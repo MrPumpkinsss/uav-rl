@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uav-rl"
+version = "0.1.0"
+description = "Reproducible experiments for robust collaborative LLM inference in UAV networks"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "accelerate>=1.0,<2",
+    "datasets>=3,<5",
+    "safetensors>=0.4,<1",
+    "torch==2.7.1",
+    "transformers>=4.45,<5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+    "ruff>=0.8,<1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["main.py", "main_2.py", "main_ppo.py", "noise_ppl.py", "ppo.py", "uav_env.py"]
