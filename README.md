@@ -2,8 +2,19 @@
 
 可复现的 UAV 协同 LLM 推理实验库。当前代码、脚本、实验产物和历史归档分层保存，避免把实验变体混入正式运行入口。
 
+## 术语速查
+
+- **PPL**：perplexity，语言模型困惑度；本文中通常越低越好。
+- **surrogate**：根据真实 CodeLlama 标签训练的快速近似模型，用来替代 PPO 训练中的昂贵真实 forward。
+- **channel**：UAV 之间的无线链路条件矩阵。
+- **boundary**：相邻两层由不同 UAV 执行时产生的跨 UAV 切换点。
+- **drop vector**：31 个可能 boundary 对应的丢包概率向量。
+- **Top-K**：先生成 K 个候选，再按 surrogate 或真实模型排序。
+- **common-seed**：所有方法使用完全相同的 channel 和 noise seed，因此结果可以直接比较。
+
 ## 目录
 
+- [术语速查](#术语速查)
 - [当前入口](#当前入口)
 - [目录结构](#目录结构)
 - [当前推荐实验和结论](#当前推荐实验和结论)
@@ -34,7 +45,7 @@
 | 用途 | 命令 |
 | --- | --- |
 | 真实 CodeLlama PPO | `scripts/ppo/train.py` |
-| layerwise surrogate PPO + 原始 Top-K | `scripts/ppo/train_layerwise_topk.py` |
+| layerwise surrogate PPO + 普通 Top-K | `scripts/ppo/train_layerwise_topk.py` |
 | frozen candidate 真实模型验证 | `scripts/ppo/validate_true_policy.py` |
 | common-seed baseline 对比 | `scripts/ppo/compare_general_assignment_baselines.py` |
 | surrogate 数据采集 | `scripts/surrogate/collect_general_assignment.py` |
@@ -71,10 +82,10 @@ docs/             项目结构和命名说明
 
 ## 当前推荐实验和结论
 
-当前 common-seed 真实验证使用 32 个 channels、4 个 activation-noise seeds 和 CodeLlama-7b：
+当前 common-seed 真实验证使用 32 个无线 channel、4 个 activation-noise seed 和 CodeLlama-7b。common-seed 的意思是：所有方法使用完全相同的 channel 和 noise seed，因此 reward 可以直接比较：
 
-- 原始 Top-K PPO Top-1 reward：`-0.400744`
-- 原始 Top-K true oracle reward：`-0.391821`
+- 当前 Top-K PPO Top-1 reward：`-0.400744`
+- 当前 Top-K true oracle reward：`-0.391821`
 - deterministic PPO reward：`-0.428221`
 - 最强非 PPO proxy beam baseline：`-0.419458`
 
@@ -87,7 +98,8 @@ legacy/experiments_2026_08/ppo/diverse_topk/
 artifacts/archive/2026-08-20/diverse_topk/
 ```
 
-后续默认使用原始 Top-K，不使用 Diverse Top-K。
+当前正式入口使用普通 Top-K 候选机制，不使用已归档的 Diverse Top-K 变体。当前结果对应 high-augmented surrogate + layerwise Top-K PPO。
+
 ## 当前最好模型
 
 当前推荐的可部署模型只有一套：
@@ -103,12 +115,12 @@ artifacts/archive/2026-08-20/diverse_topk/
 - 训练 reward 使用 frozen surrogate，不在每个 PPO action 上调用真实 CodeLlama；
 - 先用 256 个 teacher channels 和 24 个 teacher candidates 做 behavior-cloning warm start；
 - 再进行 1000 episode PPO 微调；
-- 每个 channel 生成 20 个候选，用 surrogate 排序，取 Top-1 作为实际策略输出；
+- “Top-K”表示先生成多个候选；当前每个 channel 生成 20 个候选，用 surrogate 排序，实际部署选择其中排名第 1 的候选（Top-1）；真实验证另外保留前 5 个候选，计算不可部署的 Top-5 true oracle 上界；
 - 最终用真实 CodeLlama 在 held-out channel/noise seed 上验证。
 
 当前最好是指：在本项目现有的统一 common-seed 真实评估协议下，它是**可执行、可部署方法中 reward 最好的 PPO policy**。Top-5 true oracle 的结果更高，但它需要用真实 CodeLlama 在候选中事后挑选，不能作为实际部署策略。
 
-其他已上传模型是对照或历史模型，不是并列的当前入口：
+其他已上传模型是对照或历史模型，不是并列的当前入口。这里的 `high-augmented` 表示训练数据中额外加入了高 boundary / 高丢包区域样本，目的是改善困难区域的排序能力：
 
 - `ppl_surrogate_general_assignment_ensemble.pth`：通用 surrogate 对照版本；
 - `layerwise_topk_2026-08-20b/best_policy.pth`：没有 high-boundary augmentation 的原始 Top-K 对照；
@@ -144,7 +156,7 @@ python -m ruff check src scripts tests
 deployment[layer] = uav_id
 ```
 
-channel 是 `5 x 5` 的 UAV 链路增益矩阵。相邻 layer 分配给不同 UAV 时产生一个 boundary，因此共有 31 个可能的 boundary。每个 boundary 的 drop probability 由发送 UAV、接收 UAV 和 channel 计算得到。
+`PPL` 是 perplexity（语言模型困惑度）的缩写；在本项目中，PPL 越低通常表示 LLM 生成质量越好。`channel` 是一个 `5 x 5` 的 UAV 无线链路增益矩阵，表示任意两台 UAV 之间的通信条件。相邻 layer 分配给不同 UAV 时会产生一个 boundary，也就是一次跨 UAV 切换，因此共有 31 个可能的 boundary。每个 boundary 的 drop probability 由发送 UAV、接收 UAV 和 channel 共同决定。
 
 `src/uav_rl/resource_assignment.py` 负责任意 layer-to-UAV assignment 的资源约束，包括 memory、计算能耗、通信能耗和 hover 能耗。当前 resource profile 是可复现实验场景参数，不是实际硬件规格；参数会写入数据 manifest 和 PPO run config。
 
@@ -154,8 +166,7 @@ channel 是 `5 x 5` 的 UAV 链路增益矩阵。相邻 layer 分配给不同 UA
 reward = -(quality_weight * log(PPL_noisy / PPL_clean)
            + (1 - quality_weight) * normalized_latency)
 ```
-
-不合法 assignment 的 reward 为 `-100`。
+`quality_weight` 控制质量损失和延迟的权衡；`normalized_latency` 是总延迟除以固定的 latency reference。因为 reward 是负的综合代价，所以越接近 0 越好；不合法 assignment 的 reward 为 `-100`。
 
 ## Surrogate 数据集
 
@@ -176,18 +187,17 @@ reward = -(quality_weight * log(PPL_noisy / PPL_clean)
 
 ### 数据字段和 split
 
-每个聚合 action 至少包含：`action_id`、`sample_source`、`group_id`、`channels`、`deployments`、`drop_probabilities`、`latency_seconds`、`log_ppl_ratio`、`log_ppl_ratio_std` 和 
-oise_seed_count`。
+每个聚合 action 至少包含：`action_id`、`sample_source`、`group_id`、`channels`、`deployments`、`drop_probabilities`、`latency_seconds`、`log_ppl_ratio`、`log_ppl_ratio_std` 和 `noise_seed_count`。
 
 生成器会检查 train/validation/test 之间不存在 noise seed、channel/deployment pair 或 drop vector 重叠。聚合后的当前数据规模以 `artifacts/data/general_assignment_manifest.json` 为准：
 
 | split | action 数 | 当前 seed 数 | 用途 |
 | --- | ---: | ---: | --- |
-| train | 2920 | 4 或 24 | surrogate 参数训练 |
-| validation | 64 | 16 | early stopping 和模型选择 |
-| test | 64 | 16 | 最终评估，只运行一次 |
+| train | 2920 个 action | 每个 action 使用 4 或 24 个 noise seed（不同来源不同） | surrogate 参数训练 |
+| validation | 64 个 action | 每个 action 使用 16 个 noise seed | early stopping 和模型选择 |
+| test | 64 个 action | 每个 action 使用 16 个 noise seed | 最终评估，只运行一次 |
 
-当前 train 集包含已保存的 PPO cache、coverage、random、strong-link、dynamic-programming、compute-greedy、tail 和 boundary/hazard 诊断来源。manifest 的 `legacy_train` 字段记录了被保留并合并的旧 train 文件；其他项目的 Qwen 数据不在本项目数据链路中。
+当前 train 集合并了 PPO cache、coverage、random、strong-link、dynamic-programming、compute-greedy、tail 和 boundary/hazard 诊断来源，因此历史 train action 的 seed 数可能是 4 或 24；validation/test 使用固定的 16 个 seed。manifest 的 `legacy_train` 字段记录了被保留并合并的旧 train 文件；其他项目的 Qwen 数据不在本项目数据链路中。
 
 当前数据和 cache 位于：
 
@@ -223,7 +233,7 @@ python scripts/surrogate/collect_general_assignment.py --device cuda --progress-
 
 ### 输入特征
 
-surrogate 不是直接读取 deployment 整数向量，而是读取 31 维 boundary drop probabilities，并额外计算 5 个工程特征：
+surrogate 是用真实 CodeLlama 标签训练的快速近似模型。它不是直接读取 deployment 整数向量，而是读取 31 维 boundary drop probabilities，并额外计算 5 个工程特征：
 
 1. 所有 boundary drop 的总和；
 2. 最大 boundary drop；
@@ -282,7 +292,7 @@ python scripts/surrogate/train_general_assignment.py `
   artifacts/results/ppl_surrogate_general_assignment_plots/
 ```
 
-评估包含总体 MAE、RMSE、R²、Spearman、绝对误差 p50/p90/p95/max、按 `sample_source` 分组的指标、uncertainty 与真实误差的相关性，以及 grouped reward regret。
+评估包含总体 MAE、RMSE、R²、Spearman、绝对误差 p50/p90/p95/max、按 `sample_source` 分组的指标、uncertainty 与真实误差的相关性，以及 grouped reward regret。这里的 MAE/RMSE 都是在 `log(PPL_noisy / PPL_clean)` 这个目标上计算的，不是直接的 PPL 误差；例如 MAE=0.22 表示预测的 log-PPL ratio 平均相差约 0.22。`high-boundary` 指跨 UAV 切换次数较多、通常更容易出现高丢包和高质量损失的区域。
 
 项目曾定义一组内部 surrogate 质量 gate（MAE、RMSE、Spearman 和 regret），用于决定是否继续追加数据；这些 gate 是实验管理工具，不是 PPO 算法定义，也不替代最终真实模型验证。
 
@@ -307,7 +317,7 @@ python scripts/surrogate/train_general_assignment.py `
 
 policy 是 autoregressive layerwise actor-critic：从第 0 层到第 31 层依次选择 UAV。每一步 observation 包含 channel、当前 layer index、各 UAV 已使用的 memory/energy、上一层 UAV 等信息。action mask 会屏蔽违反资源约束的 UAV。
 
-当前 trainer 的 `max_policy_boundaries=4`，即正式入口限制 policy rollout 最多出现 4 次跨 UAV boundary；资源模型本身支持任意 layer-to-UAV assignment，但这个 policy-level 限制是当前实验设计的一部分，修改它会改变训练分布，应单独做实验。
+当前 trainer 的 `max_policy_boundaries=4`，表示一次 rollout 最多允许 4 次“从一台 UAV 切换到另一台 UAV”。它不表示每台 UAV 最多只能放 8 层，也不表示只能使用 4 台 UAV：boundary 可以出现在任意两个相邻 layer 之间，所以 PPO 可以生成 1 到 5 个连续区块，区块长度也不要求相等。区块数也不等于 UAV 数量，因为 policy 可以在后面的 layer 切回之前用过的 UAV。资源模型本身支持任意 layer-to-UAV assignment；这个最多 4 次切换是当前 PPO policy 的实验限制，修改它会改变训练分布，应单独做实验。
 
 ### reward 和 PPO update
 
@@ -363,13 +373,18 @@ python scripts/ppo/train_layerwise_topk.py `
 
 ## Top-K 和真实模型验证
 
-Top-K 不是训练时调用真实 CodeLlama 的捷径，而是降低 PPO 单次随机 rollout 选择误差的一种候选机制：
+Top-K 不是训练时调用真实 CodeLlama 的捷径，而是降低 PPO 单次随机 rollout 选择误差的一种候选机制。这里有两个不同的 K：
 
-1. policy 对 held-out channel 生成多个 deployment candidate；
+- **训练和实际部署**：每个 channel 生成 20 个候选 deployment，用 surrogate reward 快速排序，选择第 1 名作为实际输出；
+- **真实模型验证**：从候选中保留前 5 个，分别用真实 CodeLlama 计算。第 1 名用于报告实际策略效果，5 个候选中的真实最优值只作为不可部署的 oracle（真实模型上界）。
+
+完整流程是：
+
+1. policy 在没有参与训练的 held-out channel 上生成多个候选部署方案；
 2. 用 surrogate reward 排序；
-3. 取 surrogate 排名第一的 candidate 作为策略输出；
-4. 同时保留 Top-K 内真实 reward oracle，作为候选质量上界；
-5. 用真实 CodeLlama 对所有候选执行固定 noise seeds，报告 surrogate Top-1、Top-K oracle、deterministic policy 和其他 baseline。
+3. 取 surrogate 排名第一的方案作为实际策略输出；
+4. 同时保留前 5 个候选，测量真实模型上界；
+5. 用固定 noise seeds 运行真实 CodeLlama，报告实际 Top-1、Top-5 oracle、deterministic policy 和其他 baseline。
 
 默认真实验证使用 32 个 channel、noise seeds `4_100_000` 起始的 4 个 seed，并把每次 `(drop_vector, noise_seed)` 的真实结果写入 run 目录的 JSONL cache。真实验证不使用训练期的 PPO noise seed。
 
@@ -389,7 +404,7 @@ artifacts/runs/surrogate_ppo/common_seed_baseline_comparison.md
 | Deterministic PPO | `-0.428221` |
 | Proxy Beam 128 | `-0.419458` |
 
-Diverse Top-K 已做过独立验证，结果没有优于当前原始 Top-K，因此不属于当前正式入口。其源码和产物保存在：
+Diverse Top-K 已做过独立验证，结果没有优于当前普通 Top-K，因此不属于当前正式入口。其源码和产物保存在：
 
 ```text
 legacy/experiments_2026_08/ppo/diverse_topk/
@@ -400,7 +415,7 @@ artifacts/archive/2026-08-20/diverse_topk/
 
 ### 评估协议
 
-下面的结果来自同一套严格 common-seed 真实模型评估：
+下面的结果来自同一套严格 common-seed 真实模型评估。这里的 common-seed 意味着所有方法使用完全相同的 channel、noise seed、资源约束、模型和 token 配置，因此 reward 可以直接比较：
 
 - 模型：`codellama/CodeLlama-7b-hf`；
 - corpus：27 个有效序列、1689 个 evaluated tokens；
@@ -419,29 +434,39 @@ artifacts/runs/surrogate_ppo/common_seed_baseline_comparison.md
 
 ### 结果表
 
-reward 越大越好，PPL 和 latency 越小越好。`ppo_topk_true_oracle` 是不可部署的候选上界，不能和实际 policy 等价比较。
+reward 是负的综合代价，因此越接近 0 越好；PPL 和 latency 越小越好。`ppo_topk_true_oracle` 是不可部署的候选上界，不能和实际 policy 等价比较。
 
 | 方法 | 算法类别 | 真实 reward ↑ | PPL ↓ | latency (s) ↓ | 相对当前 PPO |
 | --- | --- | ---: | ---: | ---: | ---: |
 | **High-augmented PPO Top-1** | **当前推荐：surrogate PPO + Top-K** | **-0.400744** | 16.735 | 0.713 | — |
-| PPO Top-5 true oracle | 候选集真实模型上界 | **-0.391821** | 16.407 | 0.714 | +2.23% |
+| PPO Top-5 true oracle | 候选集真实模型上界（不可部署） | **-0.391821** | 16.407 | 0.714 | +2.23% |
 | Proxy beam 128 | 非 PPO beam search | -0.419458 | 17.567 | **0.701** | -4.67% |
 | PPO deterministic | 同一 PPO policy 的确定性 rollout | -0.428221 | 17.728 | 0.722 | -6.86% |
-| Fixed-eight Strong-link | 旧式四段/每段八层的链路启发式 | -0.475804 | **15.310** | 1.027 | -18.73% |
-| Fixed-eight surrogate proxy | 固定八层结构 + surrogate proxy | -0.475507 | 15.431 | 1.015 | -18.66% |
+| Fixed-eight Strong-link | 历史固定分段：32 层先切成 4 段，每段 8 层，再按通信链路质量分配 UAV | -0.475804 | **15.310** | 1.027 | -18.73% |
+| Fixed-eight additive proxy | 历史固定分段：每段 8 层，再用“丢包 + 延迟”加性近似分数选 UAV | -0.475507 | 15.431 | 1.015 | -18.66% |
 | Surrogate random search 1024 | 1024 个可行 assignment 的 surrogate 搜索 | -0.488966 | 16.232 | 0.991 | -22.01% |
-| Fixed-eight Compute-greedy | 固定八层结构 + 计算速度启发式 | -0.641694 | 21.970 | 1.067 | -60.13% |
+| Fixed-eight Compute-greedy | 历史固定分段：每段 8 层，优先交给计算速度更快的 UAV | -0.641694 | 21.970 | 1.067 | -60.13% |
 | Random feasible | 随机可行 assignment | -3.383793 | 860.959 | 5.289 | -744.38% |
 
-### Baseline 算法分别做什么
+### 各个方法到底在做什么
 
-- **PPO Top-1**：当前 layerwise actor-critic policy 逐层生成 deployment；每个 channel 采样 20 个候选，用 surrogate reward 排序，选择排名第一的 candidate。
-- **PPO deterministic**：使用同一个训练好的 PPO policy，但每一步都取最大概率 action，不采样候选，用来测量 Top-K candidate generation 的贡献。
-- **PPO Top-5 true oracle**：只在 PPO 生成的 5 个候选中调用真实模型选最优者，是 candidate set upper bound，不是可部署算法。
-- **Proxy beam 128**：在任意 layer-to-UAV assignment 空间中做宽度为 128 的 beam search；逐层扩展并用 additive drop/latency proxy 排序，最后仍用真实 CodeLlama 评估。
-- **Fixed-eight Strong-link**：旧 baseline 的四段、每段八层部署结构，按跨 UAV 链路质量 proxy 选择 assignment；它的 PPL 很低，但通信和分段延迟较高。
-- **Fixed-eight Compute-greedy**：同样使用固定八层分段，但优先把层放到 compute speed 更高的 UAV。
-- **Fixed-eight surrogate proxy**：固定八层分段结构，使用 surrogate proxy 而不是链路 proxy 选 assignment。
+- **PPO Top-1**：当前推荐方法。PPO 根据 channel 和资源状态，从第 0 层到第 31 层逐层决定每一层交给哪台 UAV。每个 channel 生成 20 个候选部署方案，用 surrogate reward 快速排序，实际输出排名第 1 的方案；最终 reward 由真实 CodeLlama 测量。
+- **PPO deterministic**：使用同一个训练好的 PPO policy，但每一步都只选概率最高的 UAV，不生成多个候选，用来衡量 Top-K 候选机制是否有帮助。
+- **PPO Top-5 true oracle**：先让 PPO 生成 5 个候选，再用真实 CodeLlama 逐个计算，从中选真实 reward 最好的一个。它是候选集合的上界，但需要事后运行 5 次真实模型，因此不可部署。
+- **Proxy beam 128**：不训练 PPO，而是从第 1 层开始逐层扩展任意 layer-to-UAV assignment，每一轮只保留近似分数最好的 128 条部分路径，最后再用真实 CodeLlama 评估完整方案。它允许在任意层切换 UAV，是当前最强的非 PPO 对照之一。
+- **Fixed-eight Strong-link（历史固定分段 + 链路优先）**：这是最早的一类固定结构 baseline。它先把 32 层强制切成 4 个连续区块，每个区块正好 8 层，再把这 4 个区块交给 4 台不同的 UAV。当前配置有 5 台 UAV，所以会有 1 台不参与部署。因为有 5 台 UAV、需要按顺序选择其中 4 台，所以最多有 `5 × 4 × 3 × 2 = 120` 种区块分配顺序；之后再删除违反 memory/energy 约束的方案，并只根据 3 次区块之间的跨 UAV 链路丢包近似值选择顺序。它不能改变区块边界，也不能自由决定使用几台 UAV；通常能得到较低 PPL，但可能带来较高的通信和分段延迟。
+
+  示意如下：
+
+  ```text
+  layer  0–7    → UAV A
+  layer  8–15   → UAV B
+  layer 16–23   → UAV C
+  layer 24–31   → UAV D
+  ```
+
+- **Fixed-eight Compute-greedy（历史固定分段 + 计算优先）**：使用同样的 4 个、每个 8 层的固定区块，但优先把区块交给计算速度更快的 UAV。它主要考虑计算速度，不会系统地平衡通信质量和端到端延迟。
+- **Fixed-eight additive proxy（历史固定分段 + 透明加性排序）**：仍使用固定的 4×8 层结构，在固定候选中按“边界丢包总量 + 归一化总延迟”的加性近似分数选方案；这里的总延迟包含层计算和跨 UAV 通信延迟。它不是 neural surrogate，也不进行 PPO 学习；历史结果 JSON 中仍保留 `fixed_eight_surrogate_proxy` 这个旧 method key，但该名称不代表它调用了 surrogate checkpoint。
 - **Surrogate random search 1024**：每个 channel 随机生成 1024 个资源可行的任意 assignment，用 surrogate reward 选最优者，不做 PPO policy learning。
 - **Random feasible**：只保证 memory/energy 可行，不使用质量或 latency 目标。
 
@@ -452,7 +477,7 @@ reward 越大越好，PPL 和 latency 越小越好。`ppo_topk_true_oracle` 是�
 1. **当前 PPO 是本协议下最好的可执行策略。** Top-1 PPO 比最强非 PPO baseline `proxy_beam_128` 高 `0.018715` reward，约高 `4.67%`。
 2. **Top-K 主要减少随机 rollout 的选择误差。** 同一组 5 个候选的真实 oracle 只比 surrogate-selected Top-1 高 `0.008923`，说明 surrogate 排序保留了大部分候选收益，但仍有少量排序错误。
 3. **确定性 policy 不如 Top-K。** deterministic PPO 比 Top-1 低 `6.86%`，说明只取单条 greedy rollout 会丢掉 policy 分布中的有价值候选。
-4. **只优化链路质量并不等于 reward 最优。** Strong-link 的 PPL 最低，但 latency 约为 PPO 的 1.44 倍；当前 reward 同时考虑质量和 latency，因此总 reward 反而更差。
+4. **只优化链路质量并不等于 reward 最优。** Strong-link 的 PPL 最低，但 latency 约为 PPO 的 1.44 倍；当前 reward 同时考虑质量和 latency，因此总 reward 反而更差。这里 reward 是负的综合代价，所以越接近 0 越好。
 5. **PPO 学到的是 channel-conditioned assignment policy，而不是独立随机搜索。** surrogate random search 1024 仍低于 PPO，说明 PPO 学到的逐层决策和资源状态建模比独立采样更有效。
 6. **结果不能跨协议直接混比。** 之前的 direct true-PPL PPO 报告使用了另一组 64 test channels、16 noise seeds 和不同训练流程，不能把它的 `-0.953925` 与本表的 `-0.400744` 当作同一测试集上的直接排名；它属于“真实 PPL 训练 vs surrogate PPO”的独立对照实验。
 
@@ -512,6 +537,8 @@ deployment[layer] = uav_id
 ```text
 [0, 0, 0, 1, 1, 2, 2, ...]
 ```
+
+这个例子表示前 3 层交给 UAV 0，接着 2 层交给 UAV 1，再接着 2 层交给 UAV 2；相邻数字发生变化的位置就是 boundary，UAV 编号范围是 0 到 4。
 
 环境沿着 layer 顺序检查相邻层。如果两层在同一 UAV，则不需要跨 UAV 传输；如果两层属于不同 UAV，则在这个 boundary 传输 activation，并由对应无线链路得到 drop probability：
 
