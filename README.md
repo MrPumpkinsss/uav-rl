@@ -6,7 +6,9 @@
 
 - [当前入口](#当前入口)
 - [目录结构](#目录结构)
-- [当前默认实验](#当前默认实验)
+- [当前推荐实验和结论](#当前推荐实验和结论)
+- [当前最好模型](#当前最好模型)
+- [实验结果与分析](#实验结果与分析)
 - [检查](#检查)
 - [命名规则](#命名规则)
 - [详细实验说明](#详细实验说明)
@@ -67,7 +69,7 @@ docs/             项目结构和命名说明
 
 更完整的结构说明见 [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)。
 
-## 当前默认实验
+## 当前推荐实验和结论
 
 当前 common-seed 真实验证使用 32 个 channels、4 个 activation-noise seeds 和 CodeLlama-7b：
 
@@ -86,6 +88,31 @@ artifacts/archive/2026-08-20/diverse_topk/
 ```
 
 后续默认使用原始 Top-K，不使用 Diverse Top-K。
+## 当前最好模型
+
+当前推荐的可部署模型只有一套：
+
+| 组件 | 当前最好版本 | Git 路径 | 说明 |
+| --- | --- | --- | --- |
+| Surrogate | High-augmented 5-model ensemble | `artifacts/models/ppl_surrogate_general_assignment_high_augmented_ensemble.pth` | PPO 训练阶段的质量 reward |
+| PPO policy | High-augmented layerwise Top-K PPO | `artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth` | 当前 common-seed 真实模型评估最好的可部署 policy |
+
+该 policy 的训练方式是：
+
+- autoregressive layerwise actor-critic，逐层选择 UAV；
+- 训练 reward 使用 frozen surrogate，不在每个 PPO action 上调用真实 CodeLlama；
+- 先用 256 个 teacher channels 和 24 个 teacher candidates 做 behavior-cloning warm start；
+- 再进行 1000 episode PPO 微调；
+- 每个 channel 生成 20 个候选，用 surrogate 排序，取 Top-1 作为实际策略输出；
+- 最终用真实 CodeLlama 在 held-out channel/noise seed 上验证。
+
+当前最好是指：在本项目现有的统一 common-seed 真实评估协议下，它是**可执行、可部署方法中 reward 最好的 PPO policy**。Top-5 true oracle 的结果更高，但它需要用真实 CodeLlama 在候选中事后挑选，不能作为实际部署策略。
+
+其他已上传模型是对照或历史模型，不是并列的当前入口：
+
+- `ppl_surrogate_general_assignment_ensemble.pth`：通用 surrogate 对照版本；
+- `layerwise_topk_2026-08-20b/best_policy.pth`：没有 high-boundary augmentation 的原始 Top-K 对照；
+- `ppo_true_ppl_multiseed_best.pth`：直接用真实 PPL 训练的独立实验，不使用 surrogate，主要用于研究对照。
 
 ## 检查
 
@@ -369,6 +396,67 @@ legacy/experiments_2026_08/ppo/diverse_topk/
 artifacts/archive/2026-08-20/diverse_topk/
 ```
 
+## 实验结果与分析
+
+### 评估协议
+
+下面的结果来自同一套严格 common-seed 真实模型评估：
+
+- 模型：`codellama/CodeLlama-7b-hf`；
+- corpus：27 个有效序列、1689 个 evaluated tokens；
+- channels：32 个，由 `generate_resource_channels(32, 20260824)` 生成；
+- activation-noise seeds：`4100000`、`4100001`、`4100002`、`4100003`；
+- 所有方法使用相同的 resource/memory/energy constraints；
+- 所有 reward、PPL 和 latency 都由同一个真实 CodeLlama evaluator 重新计算；
+- 这些 validation 结果不回写 surrogate 训练数据。
+
+结果文件：
+
+```text
+artifacts/runs/surrogate_ppo/common_seed_baseline_comparison.json
+artifacts/runs/surrogate_ppo/common_seed_baseline_comparison.md
+```
+
+### 结果表
+
+reward 越大越好，PPL 和 latency 越小越好。`ppo_topk_true_oracle` 是不可部署的候选上界，不能和实际 policy 等价比较。
+
+| 方法 | 算法类别 | 真实 reward ↑ | PPL ↓ | latency (s) ↓ | 相对当前 PPO |
+| --- | --- | ---: | ---: | ---: | ---: |
+| **High-augmented PPO Top-1** | **当前推荐：surrogate PPO + Top-K** | **-0.400744** | 16.735 | 0.713 | — |
+| PPO Top-5 true oracle | 候选集真实模型上界 | **-0.391821** | 16.407 | 0.714 | +2.23% |
+| Proxy beam 128 | 非 PPO beam search | -0.419458 | 17.567 | **0.701** | -4.67% |
+| PPO deterministic | 同一 PPO policy 的确定性 rollout | -0.428221 | 17.728 | 0.722 | -6.86% |
+| Fixed-eight Strong-link | 旧式四段/每段八层的链路启发式 | -0.475804 | **15.310** | 1.027 | -18.73% |
+| Fixed-eight surrogate proxy | 固定八层结构 + surrogate proxy | -0.475507 | 15.431 | 1.015 | -18.66% |
+| Surrogate random search 1024 | 1024 个可行 assignment 的 surrogate 搜索 | -0.488966 | 16.232 | 0.991 | -22.01% |
+| Fixed-eight Compute-greedy | 固定八层结构 + 计算速度启发式 | -0.641694 | 21.970 | 1.067 | -60.13% |
+| Random feasible | 随机可行 assignment | -3.383793 | 860.959 | 5.289 | -744.38% |
+
+### Baseline 算法分别做什么
+
+- **PPO Top-1**：当前 layerwise actor-critic policy 逐层生成 deployment；每个 channel 采样 20 个候选，用 surrogate reward 排序，选择排名第一的 candidate。
+- **PPO deterministic**：使用同一个训练好的 PPO policy，但每一步都取最大概率 action，不采样候选，用来测量 Top-K candidate generation 的贡献。
+- **PPO Top-5 true oracle**：只在 PPO 生成的 5 个候选中调用真实模型选最优者，是 candidate set upper bound，不是可部署算法。
+- **Proxy beam 128**：在任意 layer-to-UAV assignment 空间中做宽度为 128 的 beam search；逐层扩展并用 additive drop/latency proxy 排序，最后仍用真实 CodeLlama 评估。
+- **Fixed-eight Strong-link**：旧 baseline 的四段、每段八层部署结构，按跨 UAV 链路质量 proxy 选择 assignment；它的 PPL 很低，但通信和分段延迟较高。
+- **Fixed-eight Compute-greedy**：同样使用固定八层分段，但优先把层放到 compute speed 更高的 UAV。
+- **Fixed-eight surrogate proxy**：固定八层分段结构，使用 surrogate proxy 而不是链路 proxy 选 assignment。
+- **Surrogate random search 1024**：每个 channel 随机生成 1024 个资源可行的任意 assignment，用 surrogate reward 选最优者，不做 PPO policy learning。
+- **Random feasible**：只保证 memory/energy 可行，不使用质量或 latency 目标。
+
+这些 baseline 的实现分别在 [`src/uav_rl/resource_baselines.py`](src/uav_rl/resource_baselines.py) 和 [`scripts/ppo/compare_general_assignment_baselines.py`](scripts/ppo/compare_general_assignment_baselines.py)。
+
+### 实验分析
+
+1. **当前 PPO 是本协议下最好的可执行策略。** Top-1 PPO 比最强非 PPO baseline `proxy_beam_128` 高 `0.018715` reward，约高 `4.67%`。
+2. **Top-K 主要减少随机 rollout 的选择误差。** 同一组 5 个候选的真实 oracle 只比 surrogate-selected Top-1 高 `0.008923`，说明 surrogate 排序保留了大部分候选收益，但仍有少量排序错误。
+3. **确定性 policy 不如 Top-K。** deterministic PPO 比 Top-1 低 `6.86%`，说明只取单条 greedy rollout 会丢掉 policy 分布中的有价值候选。
+4. **只优化链路质量并不等于 reward 最优。** Strong-link 的 PPL 最低，但 latency 约为 PPO 的 1.44 倍；当前 reward 同时考虑质量和 latency，因此总 reward 反而更差。
+5. **PPO 学到的是 channel-conditioned assignment policy，而不是独立随机搜索。** surrogate random search 1024 仍低于 PPO，说明 PPO 学到的逐层决策和资源状态建模比独立采样更有效。
+6. **结果不能跨协议直接混比。** 之前的 direct true-PPL PPO 报告使用了另一组 64 test channels、16 noise seeds 和不同训练流程，不能把它的 `-0.953925` 与本表的 `-0.400744` 当作同一测试集上的直接排名；它属于“真实 PPL 训练 vs surrogate PPO”的独立对照实验。
+
+当前结论应写成：**在统一 common-seed、真实 CodeLlama、32 channels/4 noise seeds 的评估中，high-augmented surrogate-trained Top-K PPO 是当前最好的可执行 PPO policy；它仍然落后于不可部署的 Top-5 true oracle，且并不意味着 surrogate 本身在所有 tail 区域都已达到低绝对误差。**
 ## 实验复现与可信度检查
 
 为了让一次实验具备可复现性和可解释性，建议至少做到：
@@ -523,13 +611,13 @@ f(deployment, channel) = full reward
 
 训练好的模型已经随本仓库 push 到 GitHub。下面只列当前有明确用途的 inference checkpoint；旧 tail/gated/residual 变体和大多数实验 cache 不作为当前公开入口。
 
-| 类型 | Git 路径 | 用途 | 大小 | SHA256 |
-| --- | --- | --- | ---: | --- |
-| General surrogate ensemble | [`artifacts/models/ppl_surrogate_general_assignment_ensemble.pth`](artifacts/models/ppl_surrogate_general_assignment_ensemble.pth) | 当前通用 assignment surrogate 默认 checkpoint | 5.41 MiB | `c2fd82f0df6e56e83a80bc492b9f9460ec3fd09210b52d53ea3dd02418f921ff` |
-| High-augmented surrogate ensemble | [`artifacts/models/ppl_surrogate_general_assignment_high_augmented_ensemble.pth`](artifacts/models/ppl_surrogate_general_assignment_high_augmented_ensemble.pth) | common-seed baseline 对比使用的 surrogate | 5.41 MiB | `74a472278231db33560f6a57801a0af25a91d5d6bfa18a67bfe8fc203b0d84df` |
-| Original Top-K PPO | [`artifacts/runs/surrogate_ppo/layerwise_topk_2026-08-20b/best_policy.pth`](artifacts/runs/surrogate_ppo/layerwise_topk_2026-08-20b/best_policy.pth) | 1000-episode 原始 Top-K PPO policy，使用通用 surrogate | 1.10 MiB | `be93b847e2bfb8cc1a889e8b0a36b034e05cb09568270731426d84554d176f48` |
-| High-augmented Top-K PPO | [`artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth`](artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth) | common-seed baseline 报告实际使用的 policy | 1.10 MiB | `f2ab36cde8eacf85bab27b758e14982e71321c934e6fccaf9f9c5cb94b949088` |
-| Direct true-PPL PPO | [`artifacts/models/ppo_true_ppl_multiseed_best.pth`](artifacts/models/ppo_true_ppl_multiseed_best.pth) | 不使用 surrogate、直接用真实 CodeLlama PPL 训练的 1000-episode PPO best policy | 4.84 MiB | `e424300aa7c113d72402cb4660873b43fe668d4a2d8e6d2fa1b9be9edf5b19f4` |
+| 状态 | 类型 | Git 路径 | 用途 | 大小 | SHA256 |
+| --- | --- | --- | --- | ---: | --- |
+| 对照 | General surrogate ensemble | [`artifacts/models/ppl_surrogate_general_assignment_ensemble.pth`](artifacts/models/ppl_surrogate_general_assignment_ensemble.pth) | 当前通用 assignment surrogate 默认 checkpoint | 5.41 MiB | `c2fd82f0df6e56e83a80bc492b9f9460ec3fd09210b52d53ea3dd02418f921ff` |
+| **当前最好 surrogate** | **High-augmented surrogate ensemble** | [`artifacts/models/ppl_surrogate_general_assignment_high_augmented_ensemble.pth`](artifacts/models/ppl_surrogate_general_assignment_high_augmented_ensemble.pth) | common-seed baseline 对比使用的 surrogate | 5.41 MiB | `74a472278231db33560f6a57801a0af25a91d5d6bfa18a67bfe8fc203b0d84df` |
+| 对照 | Original Top-K PPO | [`artifacts/runs/surrogate_ppo/layerwise_topk_2026-08-20b/best_policy.pth`](artifacts/runs/surrogate_ppo/layerwise_topk_2026-08-20b/best_policy.pth) | 1000-episode 原始 Top-K PPO policy，使用通用 surrogate | 1.10 MiB | `be93b847e2bfb8cc1a889e8b0a36b034e05cb09568270731426d84554d176f48` |
+| **当前最好 policy** | **High-augmented Top-K PPO** | [`artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth`](artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth) | common-seed baseline 报告实际使用的 policy | 1.10 MiB | `f2ab36cde8eacf85bab27b758e14982e71321c934e6fccaf9f9c5cb94b949088` |
+| 独立对照 | Direct true-PPL PPO | [`artifacts/models/ppo_true_ppl_multiseed_best.pth`](artifacts/models/ppo_true_ppl_multiseed_best.pth) | 不使用 surrogate、直接用真实 CodeLlama PPL 训练的 1000-episode PPO best policy | 4.84 MiB | `e424300aa7c113d72402cb4660873b43fe668d4a2d8e6d2fa1b9be9edf5b19f4` |
 
 文件大小使用 MiB 展示；SHA256 以 checkpoint 原始字节计算。模型可以 clone 后直接加载：surrogate 使用 `load_surrogate()`，PPO policy 使用对应 run 的 `SystemConfig`、resource config 和 policy 类型。
 
