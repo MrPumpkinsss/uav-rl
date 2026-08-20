@@ -231,7 +231,7 @@ python scripts/surrogate/train_general_assignment.py `
 
 评估包含总体 MAE、RMSE、R²、Spearman、绝对误差 p50/p90/p95/max、按 `sample_source` 分组的指标、uncertainty 与真实误差的相关性，以及 grouped reward regret。
 
-严格验收门槛是：test MAE ≤ 0.08、Spearman ≥ 0.90、RMSE ≤ 0.12、每个主要来源 MAE ≤ 0.12、平均 reward regret ≤ 2%、p90 regret ≤ 5%。
+项目曾定义一组内部 surrogate 质量 gate（MAE、RMSE、Spearman 和 regret），用于决定是否继续追加数据；这些 gate 是实验管理工具，不是 PPO 算法定义，也不替代最终真实模型验证。
 
 当前保存的 ensemble 的 test 结果为：
 
@@ -343,9 +343,9 @@ legacy/experiments_2026_08/ppo/diverse_topk/
 artifacts/archive/2026-08-20/diverse_topk/
 ```
 
-## 如何判断一个实验是否可以用于论文结论
+## 实验复现与可信度检查
 
-至少要同时满足：
+为了让一次实验具备可复现性和可解释性，建议至少做到：
 
 1. surrogate 数据 manifest 的 isolation audit 通过；
 2. PPO 训练使用固定且可恢复的 checkpoint；
@@ -353,7 +353,7 @@ artifacts/archive/2026-08-20/diverse_topk/
 4. 最终指标来自真实 CodeLlama，而不是 surrogate；
 5. 所有 baseline 使用完全相同的 channel、noise seed、模型和 token 配置；
 6. 报告 surrogate 误差、真实 reward、Top-K selection gap 和 invalid fraction；
-7. 如果 surrogate 未达到 MAE/RMSE/source-MAE 门槛，应把结果标记为探索性实验，不应把 PPO 的 surrogate reward 提升直接解释为真实模型提升。
+7. 记录 surrogate 的误差和适用范围；无论 surrogate 指标如何，PPO 的最终提升都必须由真实 CodeLlama 验证。
 
 ## 测试和代码质量检查
 
@@ -380,3 +380,115 @@ python -m ruff check src scripts tests
 9. `scripts/ppo/train_layerwise_topk.py`：正式 PPO 训练和真实 Top-K 验证。
 
 `legacy/` 下的文件只用于历史追溯，不是当前运行入口。
+
+## 理论链路与代码对应
+
+这一节解释项目为什么这样建模，而不只是列出命令。核心思想是把“部署决策”“无线传输造成的 activation 损伤”“LLM 质量”和“系统延迟”拆成可以分别检查的模块。
+
+### 1. 从 deployment 到质量损失
+
+PPO 产生的是完整部署策略，而不是丢包率：
+
+```text
+deployment[layer] = uav_id
+```
+
+例如一个 32 层部署可以写成：
+
+```text
+[0, 0, 0, 1, 1, 2, 2, ...]
+```
+
+环境沿着 layer 顺序检查相邻层。如果两层在同一 UAV，则不需要跨 UAV 传输；如果两层属于不同 UAV，则在这个 boundary 传输 activation，并由对应无线链路得到 drop probability：
+
+```text
+p_i = packet_drop_probability(
+    channel[deployment[i], deployment[i + 1]]
+)
+```
+
+因此一个 deployment 和一个 channel 会被转换为 31 维、有位置含义的向量：
+
+```text
+[p_0, p_1, ..., p_30]
+```
+
+转换实现位于 [`layerwise_drop_probabilities()`](src/uav_rl/resource_assignment.py)，调用链是：
+
+```text
+ResourceDeploymentEnvironment.evaluate()
+  -> layerwise_drop_probabilities()
+  -> SurrogateQualityEvaluator.evaluate()
+```
+
+### 2. 为什么 surrogate 输入是 drop vector，而不是 UAV 编号
+
+在当前 activation-dropout 假设下，CodeLlama 质量损失取决于“哪一个 layer boundary 以多大概率损失 activation”，而不是 UAV 编号这个整数本身。UAV 0、UAV 1 等编号没有物理语义；物理语义来自它们之间的 channel gain，最终已经体现在 `p_i` 中。
+
+使用 drop vector 有三个好处：
+
+- 它保留了 dropout 发生的 layer 位置，`p_3` 和 `p_20` 不会被混为一谈；
+- 它把 deployment 和 channel 的无线部分先转换成物理上有意义的表示，减少 surrogate 需要自己学习的组合关系；
+- 不同 deployment 如果产生相同的 boundary drop pattern，可以复用同一个质量模型，而不必把每个 UAV ID 组合都当成完全不同的样本。
+
+所以当前的职责划分是：
+
+```text
+deployment + channel
+    ├── memory/energy feasibility
+    ├── computation/communication latency
+    └── 31-dim drop vector -> surrogate predicts log(PPL_noisy / PPL_clean)
+```
+
+surrogate 并没有丢掉 deployment。deployment 仍然由 PPO policy 生成，并由环境用于资源约束和 latency 计算；只是 surrogate 专门负责其中的 LLM quality 子问题。
+
+### 3. 为什么 latency 不由 surrogate 预测
+
+当前 latency 有明确的解析计算方式，不需要用神经网络近似：
+
+- `layerwise_latency()` 计算每个 layer 在对应 UAV 上的计算时间；
+- 对每个跨 UAV boundary，根据 channel gain 和 activation size 计算通信时间；
+- `ResourceDeploymentEnvironment.evaluate()` 将 quality 和 normalized latency 合并成 reward。
+
+因此 surrogate 的目标只有：
+
+```text
+f(drop_vector) = log(PPL_noisy / PPL_clean)
+```
+
+而不是：
+
+```text
+f(deployment, channel) = full reward
+```
+
+完整 reward 的组合在 [`resource_environment.py`](src/uav_rl/resource_environment.py) 中完成。这样可以把可解释的系统物理计算和需要真实 CodeLlama 才能得到的质量计算分开。
+
+### 4. 数据生成、训练和 PPO 的代码地图
+
+| 理论步骤 | 代码位置 | 作用 |
+| --- | --- | --- |
+| 读取 WikiText、tokenize、计算 clean PPL | [`data/ppl_dataset.py`](src/uav_rl/data/ppl_dataset.py)、[`metrics/perplexity.py`](src/uav_rl/metrics/perplexity.py) | 得到固定 `PPL_clean` |
+| 真实 noisy PPL | [`true_quality.py`](src/uav_rl/true_quality.py) | 对 `(drop_vector, noise_seed)` 调用 CodeLlama 并写 JSONL cache |
+| 生成 action/channel 计划 | [`general_assignment_dataset.py`](src/uav_rl/data/general_assignment_dataset.py) | 采样可行 deployment、分配 split 和 noise seeds |
+| 聚合多-seed 标签 | [`general_assignment_dataset.py`](src/uav_rl/data/general_assignment_dataset.py) | 得到 action 平均 log-PPL ratio、标准差和 NPZ |
+| surrogate 网络 | [`surrogate.py`](src/uav_rl/surrogate.py) | 31 个 drop 特征加 5 个工程特征，输出 log-PPL ratio |
+| ensemble 训练 | [`surrogate_training.py`](src/uav_rl/surrogate_training.py) | 训练 5 个 MLP、validation early stopping 和 test 报告 |
+| policy observation/action | [`layerwise_policy.py`](src/uav_rl/rl/layerwise_policy.py) | 逐层选择 UAV，并应用 action mask |
+| PPO rollout/update | [`layerwise_ppo.py`](src/uav_rl/rl/layerwise_ppo.py) | surrogate reward、PPO clipped update、BC warm start 和 checkpoint |
+| Top-K 候选 | [`train_layerwise_topk.py`](scripts/ppo/train_layerwise_topk.py) | 生成候选、surrogate 排序并交给真实模型验证 |
+| baseline 对比 | [`compare_general_assignment_baselines.py`](scripts/ppo/compare_general_assignment_baselines.py) | 在相同 channel/noise seed 上比较方法 |
+
+### 5. 当前 surrogate 的适用范围
+
+当前设计隐含的建模假设是：在这个实验环境中，LLM 质量变化主要由 layer boundary 的 activation drop pattern 决定。如果未来引入不同 UAV 的量化精度、硬件数值误差、不同模型副本、重传协议或与 token 内容相关的丢包，那么 drop vector 可能不再是充分表示。
+
+这种情况下应扩展 surrogate 输入，例如加入 deployment embedding、UAV compute speed、资源利用率、channel 特征或 latency 特征；但这会改变数据生成、模型训练和验收协议，不能只改网络输入维度而继续复用旧标签。
+
+## 复现实验时最重要的边界
+
+- surrogate 训练数据的标签来自真实 CodeLlama，但 PPO 训练阶段只调用 surrogate，避免每个 PPO action 都重复真实 forward；
+- 最终 policy 验证和 baseline 对比必须调用真实 CodeLlama；
+- validation/test 使用训练期没有出现的 channel 和 noise seeds；
+- reward 的提升必须以真实模型结果为准，不能只看 surrogate reward 曲线；
+- `artifacts/` 中的 checkpoint、cache 和报告是实验产物，算法逻辑在 `src/uav_rl/`，命令入口在 `scripts/`。
