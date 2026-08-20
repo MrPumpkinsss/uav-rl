@@ -2,6 +2,31 @@
 
 可复现的 UAV 协同 LLM 推理实验库。当前代码、脚本、实验产物和历史归档分层保存，避免把实验变体混入正式运行入口。
 
+## 目录
+
+- [当前入口](#当前入口)
+- [目录结构](#目录结构)
+- [当前默认实验](#当前默认实验)
+- [检查](#检查)
+- [命名规则](#命名规则)
+- [详细实验说明](#详细实验说明)
+  - [研究对象和 action 表示](#研究对象和-action-表示)
+  - [Surrogate 数据集](#surrogate-数据集)
+  - [Surrogate 是如何训练的](#surrogate-是如何训练的)
+  - [PPO 是如何训练的](#ppo-是如何训练的)
+  - [Top-K 和真实模型验证](#top-k-和真实模型验证)
+- [实验复现与可信度检查](#实验复现与可信度检查)
+- [测试和代码质量检查](#测试和代码质量检查)
+- [给新成员的阅读顺序](#给新成员的阅读顺序)
+- [理论链路与代码对应](#理论链路与代码对应)
+  - [从 deployment 到质量损失](#1-从-deployment-到质量损失)
+  - [为什么 surrogate 输入是 drop vector](#2-为什么-surrogate-输入是-drop-vector而不是-uav-编号)
+  - [为什么 latency 不由 surrogate 预测](#3-为什么-latency-不由-surrogate-预测)
+  - [数据生成、训练和 PPO 的代码地图](#4-数据生成训练和-ppo-的代码地图)
+  - [当前 surrogate 的适用范围](#5-当前-surrogate-的适用范围)
+- [复现实验时最重要的边界](#复现实验时最重要的边界)
+- [训练好的模型和公开 checkpoint](#训练好的模型和公开-checkpoint)
+
 ## 当前入口
 
 | 用途 | 命令 |
@@ -124,7 +149,8 @@ reward = -(quality_weight * log(PPL_noisy / PPL_clean)
 
 ### 数据字段和 split
 
-每个聚合 action 至少包含：`action_id`、`sample_source`、`group_id`、`channels`、`deployments`、`drop_probabilities`、`latency_seconds`、`log_ppl_ratio`、`log_ppl_ratio_std` 和 `noise_seed_count`。
+每个聚合 action 至少包含：`action_id`、`sample_source`、`group_id`、`channels`、`deployments`、`drop_probabilities`、`latency_seconds`、`log_ppl_ratio`、`log_ppl_ratio_std` 和 
+oise_seed_count`。
 
 生成器会检查 train/validation/test 之间不存在 noise seed、channel/deployment pair 或 drop vector 重叠。聚合后的当前数据规模以 `artifacts/data/general_assignment_manifest.json` 为准：
 
@@ -495,19 +521,37 @@ f(deployment, channel) = full reward
 
 ## 训练好的模型和公开 checkpoint
 
-训练好的模型不再只停留在本地 `artifacts/`。当前已发布的 inference checkpoint、对应用途、训练配置、SHA256 和不上传的 resume state 见 [`docs/TRAINED_MODELS.md`](docs/TRAINED_MODELS.md)。
+训练好的模型已经随本仓库 push 到 GitHub。下面只列当前有明确用途的 inference checkpoint；旧 tail/gated/residual 变体和大多数实验 cache 不作为当前公开入口。
 
-当前公开的模型包括：
+| 类型 | Git 路径 | 用途 | 大小 | SHA256 |
+| --- | --- | --- | ---: | --- |
+| General surrogate ensemble | [`artifacts/models/ppl_surrogate_general_assignment_ensemble.pth`](artifacts/models/ppl_surrogate_general_assignment_ensemble.pth) | 当前通用 assignment surrogate 默认 checkpoint | 5.41 MiB | `c2fd82f0df6e56e83a80bc492b9f9460ec3fd09210b52d53ea3dd02418f921ff` |
+| High-augmented surrogate ensemble | [`artifacts/models/ppl_surrogate_general_assignment_high_augmented_ensemble.pth`](artifacts/models/ppl_surrogate_general_assignment_high_augmented_ensemble.pth) | common-seed baseline 对比使用的 surrogate | 5.41 MiB | `74a472278231db33560f6a57801a0af25a91d5d6bfa18a67bfe8fc203b0d84df` |
+| Original Top-K PPO | [`artifacts/runs/surrogate_ppo/layerwise_topk_2026-08-20b/best_policy.pth`](artifacts/runs/surrogate_ppo/layerwise_topk_2026-08-20b/best_policy.pth) | 1000-episode 原始 Top-K PPO policy，使用通用 surrogate | 1.10 MiB | `be93b847e2bfb8cc1a889e8b0a36b034e05cb09568270731426d84554d176f48` |
+| High-augmented Top-K PPO | [`artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth`](artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth) | common-seed baseline 报告实际使用的 policy | 1.10 MiB | `f2ab36cde8eacf85bab27b758e14982e71321c934e6fccaf9f9c5cb94b949088` |
+| Direct true-PPL PPO | [`artifacts/models/ppo_true_ppl_multiseed_best.pth`](artifacts/models/ppo_true_ppl_multiseed_best.pth) | 不使用 surrogate、直接用真实 CodeLlama PPL 训练的 1000-episode PPO best policy | 4.84 MiB | `e424300aa7c113d72402cb4660873b43fe668d4a2d8e6d2fa1b9be9edf5b19f4` |
 
-- 通用五模型 surrogate ensemble；
-- high-augmented surrogate ensemble（common-seed baseline 使用）；
-- 原始 Top-K PPO policy；
-- high-augmented Top-K PPO policy；
-- 直接使用真实 CodeLlama PPL 训练的 PPO best policy。
+文件大小使用 MiB 展示；SHA256 以 checkpoint 原始字节计算。模型可以 clone 后直接加载：surrogate 使用 `load_surrogate()`，PPO policy 使用对应 run 的 `SystemConfig`、resource config 和 policy 类型。
 
-需要区分两类文件：
+### 对应入口和结果
 
-- `best_policy.pth` 和 surrogate `.pth` 是可以 clone 后直接加载的 inference checkpoint；
-- `training_state.pth` 是本地断点恢复文件，包含 optimizer、history 和随机数状态，当前不作为公开 inference 模型上传。
+- 通用 surrogate 训练：`scripts/surrogate/train_general_assignment.py`
+- Top-K PPO 训练：`scripts/ppo/train_layerwise_topk.py`
+- 真实 PPL PPO 训练：`scripts/ppo/train.py`
+- high-augmented Top-K 配置：`artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/run_config.json`
+- common-seed baseline：`artifacts/runs/surrogate_ppo/common_seed_baseline_comparison.json` 和 `.md`
+- 真实 PPL PPO 报告：`artifacts/results/ppo_true_ppl_multiseed_1000_report.md`
 
-由于根目录 `.gitignore` 默认忽略实验产物，公开模型是经过筛选后显式纳入 Git 的 checkpoint，不代表 `artifacts/` 下的所有历史模型和 cache 都已上传。不要仅根据本地还有某个 `.pth` 文件，就认为它已经在 GitHub 上。
+### 不上传的训练状态
+
+`training_state.pth` 包含 optimizer、训练 history、Python/NumPy/PyTorch/CUDA 随机数状态，主要用于本地无损 resume，不是 inference 所必需的模型，所以没有纳入公开 checkpoint。根目录 `.gitignore` 仍然默认忽略其他 `artifacts/`；上表中的模型是经过筛选后显式加入 Git 的文件，不代表本地所有 `.pth`、cache 和结果都已上传。
+
+clone 后可用下面的命令检查文件完整性：
+
+```powershell
+Get-FileHash -Algorithm SHA256 artifacts/models/ppl_surrogate_general_assignment_ensemble.pth
+Get-FileHash -Algorithm SHA256 artifacts/models/ppl_surrogate_general_assignment_high_augmented_ensemble.pth
+Get-FileHash -Algorithm SHA256 artifacts/models/ppo_true_ppl_multiseed_best.pth
+Get-FileHash -Algorithm SHA256 artifacts/runs/surrogate_ppo/layerwise_topk_2026-08-20b/best_policy.pth
+Get-FileHash -Algorithm SHA256 artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth
+```
