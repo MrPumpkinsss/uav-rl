@@ -492,3 +492,22 @@ f(deployment, channel) = full reward
 - validation/test 使用训练期没有出现的 channel 和 noise seeds；
 - reward 的提升必须以真实模型结果为准，不能只看 surrogate reward 曲线；
 - `artifacts/` 中的 checkpoint、cache 和报告是实验产物，算法逻辑在 `src/uav_rl/`，命令入口在 `scripts/`。
+
+## 训练好的模型和公开 checkpoint
+
+训练好的模型不再只停留在本地 `artifacts/`。当前已发布的 inference checkpoint、对应用途、训练配置、SHA256 和不上传的 resume state 见 [`docs/TRAINED_MODELS.md`](docs/TRAINED_MODELS.md)。
+
+当前公开的模型包括：
+
+- 通用五模型 surrogate ensemble；
+- high-augmented surrogate ensemble（common-seed baseline 使用）；
+- 原始 Top-K PPO policy；
+- high-augmented Top-K PPO policy；
+- 直接使用真实 CodeLlama PPL 训练的 PPO best policy。
+
+需要区分两类文件：
+
+- `best_policy.pth` 和 surrogate `.pth` 是可以 clone 后直接加载的 inference checkpoint；
+- `training_state.pth` 是本地断点恢复文件，包含 optimizer、history 和随机数状态，当前不作为公开 inference 模型上传。
+
+由于根目录 `.gitignore` 默认忽略实验产物，公开模型是经过筛选后显式纳入 Git 的 checkpoint，不代表 `artifacts/` 下的所有历史模型和 cache 都已上传。不要仅根据本地还有某个 `.pth` 文件，就认为它已经在 GitHub 上。
