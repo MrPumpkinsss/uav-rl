@@ -19,9 +19,10 @@ from uav_rl.baselines import (
     strong_link_baseline,
 )
 from uav_rl.config import DataGenerationConfig, SystemConfig
-from uav_rl.data.ppl_dataset import _prepare_corpus, _torch_dtype
+from uav_rl.data.ppl_dataset import prepare_corpus, torch_dtype
 from uav_rl.metrics import compute_perplexity
 from uav_rl.models import activation_dropout
+from uav_rl.quality import SurrogateQualityEvaluator
 from uav_rl.rl.environment import DeploymentEnvironment, generate_channels
 from uav_rl.rl.oracle import four_segment_surrogate_oracle, full_surrogate_oracle
 from uav_rl.rl.policy import ContinuousDeploymentActorCritic
@@ -128,7 +129,7 @@ def run_true_policy_benchmark(
     if requested_oracles:
         oracle_environment = DeploymentEnvironment(
             system,
-            load_surrogate(surrogate_path, device),
+            SurrogateQualityEvaluator(load_surrogate(surrogate_path, device)),
             latency_reference,
         )
         if "four_segment_surrogate_oracle" in requested_oracles:
@@ -158,12 +159,12 @@ def run_true_policy_benchmark(
         tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(
         generation.model_id,
-        dtype=_torch_dtype(generation.dtype),
+        dtype=torch_dtype(generation.dtype),
         low_cpu_mem_usage=True,
         attn_implementation="eager",
     ).to(device)
     model.eval()
-    encoded = _prepare_corpus(generation, tokenizer)
+    encoded = prepare_corpus(generation, tokenizer)
     clean = compute_perplexity(
         model,
         encoded["input_ids"],

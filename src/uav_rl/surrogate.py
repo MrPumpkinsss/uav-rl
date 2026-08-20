@@ -62,6 +62,155 @@ class PPLSurrogate(nn.Module):
         return self.network(normalized).squeeze(-1)
 
 
+class PPLSurrogateEnsemble(nn.Module):
+    """Average independent PPL surrogates and expose epistemic uncertainty."""
+
+    def __init__(self, models: list[PPLSurrogate]) -> None:
+        super().__init__()
+        if not models:
+            raise ValueError("a surrogate ensemble must contain at least one model")
+        num_boundaries = models[0].num_boundaries
+        if any(model.num_boundaries != num_boundaries for model in models):
+            raise ValueError("all ensemble members must use the same boundary count")
+        self.num_boundaries = num_boundaries
+        self.models = nn.ModuleList(models)
+
+    def predict_with_uncertainty(
+        self,
+        drop_probabilities: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        predictions = torch.stack(
+            [model(drop_probabilities) for model in self.models],
+            dim=0,
+        )
+        return predictions.mean(dim=0), predictions.std(dim=0, unbiased=False)
+
+    def forward(self, drop_probabilities: torch.Tensor) -> torch.Tensor:
+        mean, _ = self.predict_with_uncertainty(drop_probabilities)
+        return mean
+
+
+class TailGatedSurrogate(nn.Module):
+    """Blend a frozen global ensemble with a tail-only expert ensemble."""
+
+    def __init__(
+        self,
+        base_model: PPLSurrogateEnsemble,
+        expert_models: list[PPLSurrogate],
+        *,
+        hazard_threshold: float = 0.4,
+        hazard_temperature: float = 0.03,
+    ) -> None:
+        super().__init__()
+        if not expert_models:
+            raise ValueError("a tail-gated surrogate needs at least one expert")
+        if len(base_model.models) != len(expert_models):
+            raise ValueError("base and expert ensembles must have equal member counts")
+        if hazard_temperature <= 0.0:
+            raise ValueError("hazard temperature must be positive")
+        self.base_model = base_model
+        self.expert_models = nn.ModuleList(expert_models)
+        self.num_boundaries = base_model.num_boundaries
+        self.register_buffer(
+            "hazard_threshold", torch.tensor(float(hazard_threshold))
+        )
+        self.register_buffer(
+            "hazard_temperature", torch.tensor(float(hazard_temperature))
+        )
+        for parameter in self.base_model.parameters():
+            parameter.requires_grad_(False)
+
+    def gate(self, drop_probabilities: torch.Tensor) -> torch.Tensor:
+        hazard = -torch.log1p(
+            -drop_probabilities.clamp_max(1.0 - 1e-6)
+        ).sum(dim=-1)
+        return torch.sigmoid(
+            (hazard - self.hazard_threshold) / self.hazard_temperature
+        )
+
+    def predict_with_uncertainty(
+        self,
+        drop_probabilities: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        base_predictions = torch.stack(
+            [model(drop_probabilities) for model in self.base_model.models], dim=0
+        )
+        expert_predictions = torch.stack(
+            [model(drop_probabilities) for model in self.expert_models], dim=0
+        )
+        gate = self.gate(drop_probabilities).unsqueeze(0)
+        blended = base_predictions + gate * (expert_predictions - base_predictions)
+        return blended.mean(dim=0), blended.std(dim=0, unbiased=False)
+
+    def forward(self, drop_probabilities: torch.Tensor) -> torch.Tensor:
+        mean, _ = self.predict_with_uncertainty(drop_probabilities)
+        return mean
+
+
+class TailResidualSurrogate(nn.Module):
+    """Apply a hazard-gated residual correction to a frozen global ensemble.
+
+    Residual members predict a correction to the paired global member rather
+    than a second complete PPL estimate. This keeps the global prediction
+    intact outside the tail region while targeted data corrects tail bias.
+    """
+
+    def __init__(
+        self,
+        base_model: PPLSurrogateEnsemble,
+        residual_models: list[PPLSurrogate],
+        *,
+        hazard_threshold: float = 0.4,
+        hazard_temperature: float = 0.03,
+    ) -> None:
+        super().__init__()
+        if not residual_models:
+            raise ValueError("a tail-residual surrogate needs at least one member")
+        if len(base_model.models) != len(residual_models):
+            raise ValueError("base and residual ensembles must have equal member counts")
+        if hazard_temperature <= 0.0:
+            raise ValueError("hazard temperature must be positive")
+        self.base_model = base_model
+        self.residual_models = nn.ModuleList(residual_models)
+        self.num_boundaries = base_model.num_boundaries
+        self.register_buffer("hazard_threshold", torch.tensor(float(hazard_threshold)))
+        self.register_buffer("hazard_temperature", torch.tensor(float(hazard_temperature)))
+        for parameter in self.base_model.parameters():
+            parameter.requires_grad_(False)
+
+    def gate(self, drop_probabilities: torch.Tensor) -> torch.Tensor:
+        hazard = -torch.log1p(
+            -drop_probabilities.clamp_max(1.0 - 1e-6)
+        ).sum(dim=-1)
+        return torch.sigmoid(
+            (hazard - self.hazard_threshold) / self.hazard_temperature
+        )
+
+    def predict_with_uncertainty(
+        self,
+        drop_probabilities: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        base_predictions = torch.stack(
+            [model(drop_probabilities) for model in self.base_model.models], dim=0
+        )
+        residual_predictions = torch.stack(
+            [model(drop_probabilities) for model in self.residual_models], dim=0
+        )
+        corrected = base_predictions + (
+            self.gate(drop_probabilities).unsqueeze(0) * residual_predictions
+        )
+        return corrected.mean(dim=0), corrected.std(dim=0, unbiased=False)
+
+    def forward(self, drop_probabilities: torch.Tensor) -> torch.Tensor:
+        mean, _ = self.predict_with_uncertainty(drop_probabilities)
+        return mean
+
+
+SurrogateModel = (
+    PPLSurrogate | PPLSurrogateEnsemble | TailGatedSurrogate | TailResidualSurrogate
+)
+
+
 @dataclass(frozen=True)
 class SurrogateTrainingConfig:
     seed: int = 20260810
@@ -170,11 +319,60 @@ def train_surrogate(
     return result
 
 
-def load_surrogate(path: Path, device: torch.device | None = None) -> PPLSurrogate:
-    """Load a trained, evaluation-only surrogate."""
+def load_surrogate(path: Path, device: torch.device | None = None) -> SurrogateModel:
+    """Load a single model, ensemble, tail-gated, or residual checkpoint."""
 
     target_device = device or torch.device("cpu")
     checkpoint = torch.load(path, map_location=target_device, weights_only=False)
+    if checkpoint.get("model_type") == "tail_residual_ensemble":
+        base_models = []
+        for state in checkpoint["base_model_states"]:
+            model = PPLSurrogate(
+                checkpoint["num_boundaries"], checkpoint["base_hidden_dim"]
+            )
+            model.load_state_dict(state)
+            base_models.append(model)
+        residual_models = []
+        for state in checkpoint["residual_model_states"]:
+            model = PPLSurrogate(
+                checkpoint["num_boundaries"], checkpoint["residual_hidden_dim"]
+            )
+            model.load_state_dict(state)
+            residual_models.append(model)
+        return TailResidualSurrogate(
+            PPLSurrogateEnsemble(base_models),
+            residual_models,
+            hazard_threshold=checkpoint["gate"]["hazard_threshold"],
+            hazard_temperature=checkpoint["gate"]["hazard_temperature"],
+        ).to(target_device).eval()
+    if checkpoint.get("model_type") == "tail_gated_ensemble":
+        base_models = []
+        for state in checkpoint["base_model_states"]:
+            model = PPLSurrogate(
+                checkpoint["num_boundaries"], checkpoint["base_hidden_dim"]
+            )
+            model.load_state_dict(state)
+            base_models.append(model)
+        expert_models = []
+        for state in checkpoint["expert_model_states"]:
+            model = PPLSurrogate(
+                checkpoint["num_boundaries"], checkpoint["expert_hidden_dim"]
+            )
+            model.load_state_dict(state)
+            expert_models.append(model)
+        return TailGatedSurrogate(
+            PPLSurrogateEnsemble(base_models),
+            expert_models,
+            hazard_threshold=checkpoint["gate"]["hazard_threshold"],
+            hazard_temperature=checkpoint["gate"]["hazard_temperature"],
+        ).to(target_device).eval()
+    if checkpoint.get("format_version") == 2:
+        models = []
+        for state in checkpoint["model_states"]:
+            model = PPLSurrogate(checkpoint["num_boundaries"], checkpoint["hidden_dim"])
+            model.load_state_dict(state)
+            models.append(model)
+        return PPLSurrogateEnsemble(models).to(target_device).eval()
     model = PPLSurrogate(checkpoint["num_boundaries"], checkpoint["hidden_dim"])
     model.load_state_dict(checkpoint["model_state"])
     return model.to(target_device).eval()

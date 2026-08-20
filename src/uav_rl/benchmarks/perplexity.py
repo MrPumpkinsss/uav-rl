@@ -8,9 +8,8 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
+import numpy as np
 import torch
-from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from uav_rl.metrics import PerplexityResult, compute_perplexity
 
@@ -61,6 +60,7 @@ class PerplexityBenchmarkResult:
     data_prepare_seconds: float
     peak_memory_mib: float | None
     gpu_name: str | None
+    numpy_version: str
     torch_version: str
     transformers_version: str
     python_version: str
@@ -78,6 +78,8 @@ def _resolve_dtype(name: str) -> torch.dtype:
 
 
 def _load_and_tokenize(config: PerplexityBenchmarkConfig, tokenizer: Any) -> dict[str, Any]:
+    from datasets import load_dataset
+
     dataset = load_dataset(
         config.dataset_name,
         config.dataset_config,
@@ -112,6 +114,8 @@ def run_perplexity_benchmark(
     """
 
     config.validate()
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
     device = torch.device(config.device)
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested, but PyTorch cannot access a CUDA device")
@@ -182,6 +186,7 @@ def run_perplexity_benchmark(
         data_prepare_seconds=data_prepare_seconds,
         peak_memory_mib=peak_memory,
         gpu_name=torch.cuda.get_device_name(device) if device.type == "cuda" else None,
+        numpy_version=np.__version__,
         torch_version=torch.__version__,
         transformers_version=transformers.__version__,
         python_version=platform.python_version(),

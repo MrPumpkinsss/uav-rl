@@ -1,0 +1,448 @@
+"""PPO trainer for paper-style arbitrary layer-to-UAV assignments."""
+
+from __future__ import annotations
+
+import os
+import random
+from collections.abc import Callable
+from copy import deepcopy
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import torch
+
+from uav_rl.config import PPOConfig
+from uav_rl.noise_seeds import sample_training_noise_seeds, validation_noise_seeds
+from uav_rl.resource_assignment import ResourceConstrainedConfig
+from uav_rl.resource_environment import ResourceDeploymentEnvironment, generate_resource_channels
+from uav_rl.rl.layerwise_policy import (
+    LayerwiseActorCritic,
+    layer_state,
+    valid_layer_action_mask,
+)
+
+
+class LayerwisePPOTrainer:
+    """Train an independent autoregressive layer assignment policy."""
+
+    policy_type = "layerwise_general_assignment"
+
+    def __init__(
+        self,
+        config: PPOConfig,
+        resource_config: ResourceConstrainedConfig,
+        environment: ResourceDeploymentEnvironment,
+        teacher_action_provider: Callable[[np.ndarray], np.ndarray] | None = None,
+        max_policy_boundaries: int = 4,
+    ) -> None:
+        self.config = config
+        self.resource_config = resource_config
+        self.environment = environment
+        self.teacher_action_provider = teacher_action_provider
+        if max_policy_boundaries < 1 or max_policy_boundaries >= resource_config.system.num_layers:
+            raise ValueError('max_policy_boundaries is out of range')
+        self.max_policy_boundaries = max_policy_boundaries
+        random.seed(config.seed)
+        np.random.seed(config.seed)
+        torch.manual_seed(config.seed)
+        self.model = LayerwiseActorCritic(resource_config, config.hidden_dim)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=config.learning_rate)
+        self.validation_noise_seeds = validation_noise_seeds(
+            config.validation_noise_samples, config.validation_noise_seed
+        )
+
+    def _rollout_one(
+        self,
+        normalized_channel: np.ndarray,
+        *,
+        deterministic: bool,
+    ) -> tuple[list[np.ndarray], list[np.ndarray], list[int], list[float], list[float], np.ndarray]:
+        layers = self.resource_config.system.num_layers
+        uavs = self.resource_config.system.num_uavs
+        memory_used = np.zeros(uavs, dtype=np.float64)
+        energy_used = np.zeros(uavs, dtype=np.float64)
+        previous: int | None = None
+        boundary_count = 0
+        states: list[np.ndarray] = []
+        masks: list[np.ndarray] = []
+        actions: list[int] = []
+        log_probs: list[float] = []
+        values: list[float] = []
+        deployment = np.zeros(layers, dtype=np.int64)
+        speeds = np.asarray(self.resource_config.system.compute_speed, dtype=np.float64)
+        for layer_index in range(layers):
+            state = layer_state(
+                normalized_channel,
+                layer_index=layer_index,
+                memory_used=memory_used,
+                energy_used=energy_used,
+                previous_uav=previous,
+                config=self.resource_config,
+            )
+            mask = valid_layer_action_mask(
+                layer_index=layer_index,
+                memory_used=memory_used,
+                energy_used=energy_used,
+                config=self.resource_config,
+            )
+            if previous is not None and boundary_count >= self.max_policy_boundaries and mask[previous]:
+                mask[:] = False
+                mask[previous] = True
+            with torch.no_grad():
+                output = self.model.sample(
+                    torch.from_numpy(state[None, :]),
+                    torch.from_numpy(mask[None, :]),
+                    deterministic=deterministic,
+                )
+            action = int(output.actions.item())
+            states.append(state)
+            masks.append(mask)
+            actions.append(action)
+            log_probs.append(float(output.log_probabilities.item()))
+            values.append(float(output.values.item()))
+            deployment[layer_index] = action
+            if previous is not None and action != previous:
+                boundary_count += 1
+            memory_used[action] += self.resource_config.layer_memory_units[layer_index]
+            energy_used[action] += float(
+                self.resource_config.compute_energy_coefficient
+                * speeds[action] ** 2
+                * self.resource_config.layer_compute_seconds_at_unit_speed[layer_index]
+            )
+            previous = action
+        return states, masks, actions, log_probs, values, deployment
+
+    def deployments(self, channels: np.ndarray, *, deterministic: bool) -> np.ndarray:
+        normalized = self.environment.normalize_channels(channels)
+        return np.stack(
+            [self._rollout_one(channel, deterministic=deterministic)[-1] for channel in normalized]
+        )
+
+    def top_k_deployments(
+        self,
+        channels: np.ndarray,
+        *,
+        k: int,
+        samples_per_channel: int | None = None,
+    ):
+        if k < 1:
+            raise ValueError('k must be positive')
+        channels = np.asarray(channels, dtype=np.float32)
+        normalized = self.environment.normalize_channels(channels)
+        candidates = []
+        rewards = []
+        beam_width = max(k, samples_per_channel or (4 * k))
+        speeds = np.asarray(self.resource_config.system.compute_speed, dtype=np.float64)
+        for channel, normalized_channel in zip(channels, normalized, strict=True):
+            beams = [(0.0, np.zeros(self.resource_config.system.num_uavs), np.zeros(self.resource_config.system.num_uavs), None, 0, [])]
+            for layer_index in range(self.resource_config.system.num_layers):
+                expanded = []
+                for logp, memory_used, energy_used, previous, boundary_count, deployment in beams:
+                    state = layer_state(normalized_channel, layer_index=layer_index, memory_used=memory_used, energy_used=energy_used, previous_uav=previous, config=self.resource_config)
+                    mask = valid_layer_action_mask(layer_index=layer_index, memory_used=memory_used, energy_used=energy_used, config=self.resource_config)
+                    if previous is not None and boundary_count >= self.max_policy_boundaries and mask[previous]:
+                        mask[:] = False
+                        mask[previous] = True
+                    with torch.no_grad():
+                        distribution = self.model._distribution(torch.from_numpy(state[None, :]), torch.from_numpy(mask[None, :]))
+                        action_scores = [(int(action), float(distribution.log_prob(torch.tensor([int(action)])).item())) for action in np.flatnonzero(mask)]
+                    action_scores.sort(key=lambda item: item[1], reverse=True)
+                    for action, action_logp in action_scores[:beam_width]:
+                        next_memory = memory_used.copy()
+                        next_energy = energy_used.copy()
+                        next_memory[action] += self.resource_config.layer_memory_units[layer_index]
+                        next_energy[action] += self.resource_config.compute_energy_coefficient * speeds[action] ** 2 * self.resource_config.layer_compute_seconds_at_unit_speed[layer_index]
+                        expanded.append((logp + action_logp, next_memory, next_energy, action, boundary_count + int(previous is not None and action != previous), deployment + [action]))
+                expanded.sort(key=lambda item: item[0], reverse=True)
+                beams = expanded[:beam_width]
+            unique = {}
+            for _, _, _, _, _, deployment in beams:
+                array = np.asarray(deployment, dtype=np.int64)
+                unique.setdefault(array.tobytes(), array)
+            candidate_array = np.stack(list(unique.values()))
+            repeated = np.repeat(channel[None, :, :], len(candidate_array), axis=0)
+            values, _ = self.environment.evaluate(repeated, candidate_array)
+            order = np.argsort(values)[::-1][:k]
+            if len(order) < k:
+                order = np.pad(order, (0, k - len(order)), mode='edge')
+            candidates.append(candidate_array[order])
+            rewards.append(values[order])
+        return np.stack(candidates), np.stack(rewards)
+
+    def _validation_reward(self, channels: np.ndarray) -> float:
+        deployments = self.deployments(channels, deterministic=True)
+        rewards, _ = self.environment.evaluate(
+            channels, deployments, noise_seeds=self.validation_noise_seeds
+        )
+        return float(rewards.mean())
+
+    def _behavior_clone(self) -> list[float]:
+        if self.config.teacher_channels == 0 or self.config.behavior_cloning_epochs == 0:
+            return []
+        if self.teacher_action_provider is None:
+            raise ValueError("layerwise behavior cloning requires an explicit teacher provider")
+        channels = generate_resource_channels(
+            self.config.teacher_channels, self.config.teacher_seed, self.resource_config
+        )
+        deployments = np.asarray(self.teacher_action_provider(channels), dtype=np.int64)
+        expected = (len(channels), self.resource_config.system.num_layers)
+        if deployments.shape != expected:
+            raise ValueError(f"teacher provider returned {deployments.shape}, expected {expected}")
+        normalized = self.environment.normalize_channels(channels)
+        states: list[np.ndarray] = []
+        masks: list[np.ndarray] = []
+        actions: list[int] = []
+        speeds = np.asarray(self.resource_config.system.compute_speed, dtype=np.float64)
+        for channel, deployment in zip(normalized, deployments, strict=True):
+            memory_used = np.zeros(self.resource_config.system.num_uavs, dtype=np.float64)
+            energy_used = np.zeros(self.resource_config.system.num_uavs, dtype=np.float64)
+            previous: int | None = None
+            for layer_index, action in enumerate(deployment):
+                mask = valid_layer_action_mask(
+                    layer_index=layer_index,
+                    memory_used=memory_used,
+                    energy_used=energy_used,
+                    config=self.resource_config,
+                )
+                action = int(action)
+                if not mask[action]:
+                    raise ValueError("teacher deployment is infeasible under resource constraints")
+                states.append(
+                    layer_state(
+                        channel,
+                        layer_index=layer_index,
+                        memory_used=memory_used,
+                        energy_used=energy_used,
+                        previous_uav=previous,
+                        config=self.resource_config,
+                    )
+                )
+                masks.append(mask)
+                actions.append(action)
+                memory_used[action] += self.resource_config.layer_memory_units[layer_index]
+                energy_used[action] += float(
+                    self.resource_config.compute_energy_coefficient
+                    * speeds[action] ** 2
+                    * self.resource_config.layer_compute_seconds_at_unit_speed[layer_index]
+                )
+                previous = action
+        state_tensor = torch.from_numpy(np.stack(states))
+        mask_tensor = torch.from_numpy(np.stack(masks))
+        action_tensor = torch.tensor(actions, dtype=torch.long)
+        optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=self.config.behavior_cloning_learning_rate
+        )
+        losses: list[float] = []
+        for epoch in range(self.config.behavior_cloning_epochs):
+            order = torch.randperm(len(actions))
+            total = 0.0
+            for start in range(0, len(order), self.config.minibatch_size):
+                index = order[start : start + self.config.minibatch_size]
+                output = self.model.evaluate(state_tensor[index], mask_tensor[index], action_tensor[index])
+                loss = -output.log_probabilities.mean()
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
+                optimizer.step()
+                total += float(loss.item()) * len(index)
+            mean_loss = total / len(actions)
+            losses.append(mean_loss)
+            print(f"layerwise_behavior_cloning_epoch={epoch + 1:3d} loss={mean_loss:.6f}", flush=True)
+        return losses
+
+    def _atomic_save(self, payload: dict[str, Any], path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        torch.save(payload, temporary)
+        with temporary.open("ab") as handle:
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.replace(path)
+
+    def _candidate_payload(self, episodes: int, monitor_reward: float) -> dict[str, Any]:
+        return {
+            "format_version": 1,
+            "purpose": "external_policy_validation_candidate",
+            "policy_type": self.policy_type,
+            "model_state": self.model.state_dict(),
+            "ppo_config": asdict(self.config),
+            "resource_config": self.resource_config.to_dict(),
+            "episodes": episodes,
+            "training_monitor_reward": monitor_reward,
+            "inference": "channel_to_layerwise_assignment_without_teacher",
+        }
+
+    def train(
+        self,
+        output_path: Path,
+        *,
+        state_path: Path,
+        run_metadata: dict[str, Any],
+        candidate_directory: Path,
+        candidate_interval_episodes: int,
+        resume: bool = False,
+    ) -> dict[str, list[float]]:
+        """Train with atomic rollout-boundary state and exact candidate intervals."""
+
+        if candidate_interval_episodes < 1:
+            raise ValueError("candidate interval must be positive")
+        candidate_directory.mkdir(parents=True, exist_ok=True)
+        validation_channels = generate_resource_channels(
+            self.config.validation_channels, self.config.validation_seed, self.resource_config
+        )
+        if resume:
+            state = torch.load(state_path, map_location="cpu", weights_only=False)
+            if state.get("run_metadata") != run_metadata or state.get("policy_type") != self.policy_type:
+                raise ValueError("layerwise resume metadata is incompatible")
+            if state.get('resource_config') != self.resource_config.to_dict():
+                raise ValueError('layerwise resource configuration is incompatible')
+            saved_config = dict(state["ppo_config"])
+            current_config = asdict(self.config)
+            saved_target = saved_config.pop("training_episodes")
+            current_target = current_config.pop("training_episodes")
+            if saved_config != current_config or current_target < saved_target:
+                raise ValueError("only training_episodes may increase when resuming")
+            self.model.load_state_dict(state["model_state"])
+            self.optimizer.load_state_dict(state["optimizer_state"])
+            random.setstate(state["python_random_state"])
+            np.random.set_state(state["numpy_random_state"])
+            torch.set_rng_state(state["torch_random_state"])
+            if torch.cuda.is_available() and state.get('torch_cuda_random_states') is not None:
+                torch.cuda.set_rng_state_all(state['torch_cuda_random_states'])
+            completed = int(state["completed_episodes"])
+            rollout_index = int(state["rollout_index"])
+            best_reward = float(state["best_validation_reward"])
+            best_episodes = int(state["best_episodes"])
+            best_model_state = state["best_model_state"]
+            history = state["history"]
+            channel_rng = np.random.default_rng()
+            channel_rng.bit_generator.state = state["channel_rng_state"]
+            noise_rng = np.random.default_rng()
+            noise_rng.bit_generator.state = state["noise_rng_state"]
+        else:
+            history = {
+                "behavior_cloning_loss": self._behavior_clone(),
+                "reward": [],
+                "latency": [],
+                "log_ppl_ratio": [],
+                "invalid_fraction": [],
+                "validation_reward": [],
+            }
+            completed = 0
+            rollout_index = 0
+            channel_rng = np.random.default_rng(self.config.seed)
+            noise_rng = np.random.default_rng(self.config.training_noise_seed)
+            best_reward = self._validation_reward(validation_channels)
+            best_episodes = 0
+            best_model_state = deepcopy(self.model.state_dict())
+
+        while completed < self.config.training_episodes:
+            rollout_size = min(
+                self.config.rollout_size,
+                candidate_interval_episodes - completed % candidate_interval_episodes,
+                self.config.training_episodes - completed,
+            )
+            channels = generate_resource_channels(rollout_size, int(channel_rng.integers(2**31)), self.resource_config)
+            normalized = self.environment.normalize_channels(channels)
+            all_states: list[np.ndarray] = []
+            all_masks: list[np.ndarray] = []
+            all_actions: list[int] = []
+            all_old_log_probs: list[float] = []
+            all_old_values: list[float] = []
+            deployments: list[np.ndarray] = []
+            for channel in normalized:
+                states, masks, actions, log_probs, values, deployment = self._rollout_one(
+                    channel, deterministic=False
+                )
+                all_states.extend(states)
+                all_masks.extend(masks)
+                all_actions.extend(actions)
+                all_old_log_probs.extend(log_probs)
+                all_old_values.extend(values)
+                deployments.append(deployment)
+            deployments_array = np.stack(deployments)
+            noise_seeds = sample_training_noise_seeds(
+                noise_rng, rollout_size, self.config.training_noise_samples
+            )
+            rewards_np, details = self.environment.evaluate(
+                channels, deployments_array, noise_seeds=noise_seeds
+            )
+            states_tensor = torch.from_numpy(np.stack(all_states))
+            masks_tensor = torch.from_numpy(np.stack(all_masks))
+            actions_tensor = torch.tensor(all_actions, dtype=torch.long)
+            old_log_probs = torch.tensor(all_old_log_probs, dtype=torch.float32)
+            old_values = torch.tensor(all_old_values, dtype=torch.float32)
+            returns = torch.from_numpy(np.repeat(rewards_np, self.resource_config.system.num_layers))
+            advantages = returns - old_values
+            normalized_advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            for _ in range(self.config.update_epochs):
+                order = torch.randperm(len(all_actions))
+                for start in range(0, len(order), self.config.minibatch_size):
+                    index = order[start : start + self.config.minibatch_size]
+                    output = self.model.evaluate(states_tensor[index], masks_tensor[index], actions_tensor[index])
+                    ratio = torch.exp(output.log_probabilities - old_log_probs[index])
+                    advantage = normalized_advantages[index]
+                    policy_loss = -torch.minimum(
+                        ratio * advantage,
+                        torch.clamp(ratio, 1.0 - self.config.clip_epsilon, 1.0 + self.config.clip_epsilon)
+                        * advantage,
+                    ).mean()
+                    value_loss = torch.mean((output.values - returns[index]) ** 2)
+                    loss = policy_loss + self.config.value_coefficient * value_loss - self.config.entropy_coefficient * output.entropy.mean()
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
+                    self.optimizer.step()
+            completed += rollout_size
+            rollout_index += 1
+            history["reward"].append(float(rewards_np.mean()))
+            history["latency"].append(float(details["latency_seconds"].mean()))
+            history["log_ppl_ratio"].append(float(details["log_ppl_ratio"].mean()))
+            history["invalid_fraction"].append(float(details["invalid"].mean()))
+            candidate_due = completed % candidate_interval_episodes == 0
+            monitor = best_reward
+            if candidate_due or completed == self.config.training_episodes or rollout_index % self.config.validation_interval == 0:
+                monitor = self._validation_reward(validation_channels)
+                history["validation_reward"].append(monitor)
+                if monitor > best_reward:
+                    best_reward = monitor
+                    best_episodes = completed
+                    best_model_state = deepcopy(self.model.state_dict())
+            if candidate_due:
+                self._atomic_save(self._candidate_payload(completed, monitor), candidate_directory / f"episode_{completed:06d}.pth")
+            self._atomic_save(
+                {
+                    "format_version": 1,
+                    "policy_type": self.policy_type,
+                    "ppo_config": asdict(self.config),
+                    "resource_config": self.resource_config.to_dict(),
+                    "model_state": self.model.state_dict(),
+                    "optimizer_state": self.optimizer.state_dict(),
+                    "best_model_state": best_model_state,
+                    "best_validation_reward": best_reward,
+                    "best_episodes": best_episodes,
+                    "completed_episodes": completed,
+                    "rollout_index": rollout_index,
+                    "history": history,
+                    "python_random_state": random.getstate(),
+                    "numpy_random_state": np.random.get_state(),
+                    "torch_random_state": torch.get_rng_state(),
+                    'torch_cuda_random_states': (
+                        torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+                    ),
+                    "channel_rng_state": channel_rng.bit_generator.state,
+                    "noise_rng_state": noise_rng.bit_generator.state,
+                    "run_metadata": run_metadata,
+                },
+                state_path,
+            )
+            print(
+                f"layerwise_episodes={completed:5d} reward={rewards_np.mean():.4f} "
+                f"invalid={details['invalid'].mean():.3f} monitor={monitor:.4f}",
+                flush=True,
+            )
+        self.model.load_state_dict(best_model_state)
+        self._atomic_save(self._candidate_payload(best_episodes, best_reward), output_path)
+        return history

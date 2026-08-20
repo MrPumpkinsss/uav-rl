@@ -11,7 +11,7 @@ from typing import Any
 
 import numpy as np
 import torch
-from datasets import load_dataset
+from datasets import Dataset, load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from uav_rl.config import DataGenerationConfig, SystemConfig
@@ -21,18 +21,23 @@ from uav_rl.models import activation_dropout
 from uav_rl.wireless import boundary_drop_probabilities, sample_channel
 
 
-def _torch_dtype(name: str) -> torch.dtype:
+def torch_dtype(name: str) -> torch.dtype:
     return {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[name]
 
 
-def _prepare_corpus(config: DataGenerationConfig, tokenizer: Any) -> dict[str, torch.Tensor]:
-    dataset = load_dataset(
-        config.dataset_name,
-        config.dataset_config,
-        split=f"{config.dataset_split}[:{config.text_sample_limit}]",
-    )
+def prepare_corpus(config: DataGenerationConfig, tokenizer: Any) -> dict[str, torch.Tensor]:
+    if config.dataset_arrow_file is None:
+        dataset = load_dataset(
+            config.dataset_name,
+            config.dataset_config,
+            split=f"{config.dataset_split}[:{config.text_sample_limit}]",
+        )
+    else:
+        dataset = Dataset.from_file(config.dataset_arrow_file)
+        dataset = dataset.select(range(min(config.text_sample_limit, len(dataset))))
+    print("ppl_dataset_loaded=true", flush=True)
     texts = [text for text in dataset["text"] if text.strip()]
-    return tokenizer(
+    encoded = tokenizer(
         texts,
         add_special_tokens=True,
         padding=True,
@@ -41,6 +46,8 @@ def _prepare_corpus(config: DataGenerationConfig, tokenizer: Any) -> dict[str, t
         return_attention_mask=True,
         return_tensors="pt",
     )
+    print("ppl_dataset_tokenized=true", flush=True)
+    return encoded
 
 
 def generate_ppl_dataset(
@@ -62,12 +69,12 @@ def generate_ppl_dataset(
         tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(
         generation.model_id,
-        dtype=_torch_dtype(generation.dtype),
+        dtype=torch_dtype(generation.dtype),
         low_cpu_mem_usage=True,
         attn_implementation="eager",
     ).to(device)
     model.eval()
-    encoded = _prepare_corpus(generation, tokenizer)
+    encoded = prepare_corpus(generation, tokenizer)
 
     torch.manual_seed(generation.noise_seed)
     clean = compute_perplexity(
@@ -236,12 +243,12 @@ def append_tail_ppl_samples(
         tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(
         generation.model_id,
-        dtype=_torch_dtype(generation.dtype),
+        dtype=torch_dtype(generation.dtype),
         low_cpu_mem_usage=True,
         attn_implementation="eager",
     ).to(device)
     model.eval()
-    encoded = _prepare_corpus(generation, tokenizer)
+    encoded = prepare_corpus(generation, tokenizer)
     clean = compute_perplexity(
         model,
         encoded["input_ids"],

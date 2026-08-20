@@ -7,7 +7,6 @@ import time
 from functools import cache
 
 import numpy as np
-import torch
 
 from uav_rl.config import SystemConfig
 from uav_rl.rl.environment import DeploymentEnvironment
@@ -143,7 +142,6 @@ def surrogate_oracle_deployments(
     computation_seconds = np.sum(
         config.compute_seconds_per_layer / compute_speed[candidates], axis=1
     )
-    surrogate_device = next(environment.surrogate.parameters()).device
     selected = np.empty((len(channels), config.num_layers), dtype=np.int64)
     started_at = time.perf_counter()
 
@@ -169,9 +167,7 @@ def surrogate_oracle_deployments(
         best_reward = -float("inf")
         for start in range(0, len(candidates), candidate_batch_size):
             stop = min(start + candidate_batch_size, len(candidates))
-            drop_tensor = torch.from_numpy(drops[start:stop]).to(surrogate_device)
-            with torch.no_grad():
-                qualities = environment.surrogate(drop_tensor).clamp_min(0.0).cpu().numpy()
+            qualities = environment.quality_evaluator.evaluate(drops[start:stop])
             rewards = -(
                 config.quality_weight * qualities
                 + (1.0 - config.quality_weight)

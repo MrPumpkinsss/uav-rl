@@ -1,0 +1,451 @@
+{
+  "format_version": 1,
+  "archive_date": "2026-08-16",
+  "file_count": 44,
+  "notes": [
+    "Source and archived hashes were checked equal at move time.",
+    "External Qwen3/28-layer projects and data are intentionally excluded."
+  ],
+  "files": [
+    {
+      "original_path": "DRL_interface.py",
+      "archived_path": "legacy/prototype_v0/DRL_interface.py",
+      "source_size_bytes": 226,
+      "archived_size_bytes": 226,
+      "source_sha256": "a04c0c3be96ba154b3eacd94180077596ec1bc9518cb7c69613f586774c4e8c2",
+      "archived_sha256": "a04c0c3be96ba154b3eacd94180077596ec1bc9518cb7c69613f586774c4e8c2",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "main.py",
+      "archived_path": "legacy/prototype_v0/main.py",
+      "source_size_bytes": 6460,
+      "archived_size_bytes": 6460,
+      "source_sha256": "89b33b6327097db71ffd72699b6833e02b2ebe9dafbeb9ed3e369474b2921b39",
+      "archived_sha256": "89b33b6327097db71ffd72699b6833e02b2ebe9dafbeb9ed3e369474b2921b39",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "main_2.py",
+      "archived_path": "legacy/prototype_v0/main_2.py",
+      "source_size_bytes": 7137,
+      "archived_size_bytes": 7137,
+      "source_sha256": "1fc5bd78b44261da9d33b7aebaf90f08144371722beef374939c9cde9a81d0a1",
+      "archived_sha256": "1fc5bd78b44261da9d33b7aebaf90f08144371722beef374939c9cde9a81d0a1",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "main_ppo.py",
+      "archived_path": "legacy/prototype_v0/main_ppo.py",
+      "source_size_bytes": 3281,
+      "archived_size_bytes": 3281,
+      "source_sha256": "82fcd864ba91cdbdc904e3e7db580c4baeee54abcda825e478c05715578cc784",
+      "archived_sha256": "82fcd864ba91cdbdc904e3e7db580c4baeee54abcda825e478c05715578cc784",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "noise_ppl.py",
+      "archived_path": "legacy/prototype_v0/noise_ppl.py",
+      "source_size_bytes": 6579,
+      "archived_size_bytes": 6579,
+      "source_sha256": "9472865a8bc3c15b6bfffafa0ef4e2fe7021f036456695bc5ee61c320c2de0c9",
+      "archived_sha256": "9472865a8bc3c15b6bfffafa0ef4e2fe7021f036456695bc5ee61c320c2de0c9",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "ppo.py",
+      "archived_path": "legacy/prototype_v0/ppo.py",
+      "source_size_bytes": 3860,
+      "archived_size_bytes": 3860,
+      "source_sha256": "484c39ee59df298f081569390b75104f9c225d14a7112418148b1de2ef8e8c4f",
+      "archived_sha256": "484c39ee59df298f081569390b75104f9c225d14a7112418148b1de2ef8e8c4f",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "ppo_model.pth",
+      "archived_path": "legacy/prototype_v0/ppo_model.pth",
+      "source_size_bytes": 466727,
+      "archived_size_bytes": 466727,
+      "source_sha256": "1ca9ba2b15c3969af35d92a731a9844d645b011a25121117345cfab935e7b08c",
+      "archived_sha256": "1ca9ba2b15c3969af35d92a731a9844d645b011a25121117345cfab935e7b08c",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "ppo_policy.pth",
+      "archived_path": "legacy/prototype_v0/ppo_policy.pth",
+      "source_size_bytes": 89702,
+      "archived_size_bytes": 89702,
+      "source_sha256": "e04a0635e2b916845c07f42c140b270f3ee5ca759c2c03442d5883917e6d378a",
+      "archived_sha256": "e04a0635e2b916845c07f42c140b270f3ee5ca759c2c03442d5883917e6d378a",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "runs/Aug25_10-47-10_super/events.out.tfevents.1756090030.super.3080771.0",
+      "archived_path": "legacy/prototype_v0/runs/Aug25_10-47-10_super/events.out.tfevents.1756090030.super.3080771.0",
+      "source_size_bytes": 21032,
+      "archived_size_bytes": 21032,
+      "source_sha256": "fb9bf5ebe77a471bdb7bf74889c4f34b8aad38ce5d3a62c38a679c08965c38ea",
+      "archived_sha256": "fb9bf5ebe77a471bdb7bf74889c4f34b8aad38ce5d3a62c38a679c08965c38ea",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "runs/Jul09_15-35-46_super/events.out.tfevents.1752046546.super.1444693.0",
+      "archived_path": "legacy/prototype_v0/runs/Jul09_15-35-46_super/events.out.tfevents.1752046546.super.1444693.0",
+      "source_size_bytes": 21032,
+      "archived_size_bytes": 21032,
+      "source_sha256": "fe332629fd044fdb277832346ab4a1f9c4fb4c5207eef48e59888c9d0b882c43",
+      "archived_sha256": "fe332629fd044fdb277832346ab4a1f9c4fb4c5207eef48e59888c9d0b882c43",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "runs/May30_20-22-46_super/events.out.tfevents.1748607766.super.109913.0",
+      "archived_path": "legacy/prototype_v0/runs/May30_20-22-46_super/events.out.tfevents.1748607766.super.109913.0",
+      "source_size_bytes": 40,
+      "archived_size_bytes": 40,
+      "source_sha256": "cc8ab57c6bdced1d8a41282d148e0c031db7d07d7f32274a71d60ea27f8b0ad5",
+      "archived_sha256": "cc8ab57c6bdced1d8a41282d148e0c031db7d07d7f32274a71d60ea27f8b0ad5",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "runs/May30_20-29-19_super/events.out.tfevents.1748608159.super.130203.0",
+      "archived_path": "legacy/prototype_v0/runs/May30_20-29-19_super/events.out.tfevents.1748608159.super.130203.0",
+      "source_size_bytes": 662,
+      "archived_size_bytes": 662,
+      "source_sha256": "9cd0afc0631a2d2a7d0737eef8a1a75c6127fa69541eaf8f83dd8482ddf632ad",
+      "archived_sha256": "9cd0afc0631a2d2a7d0737eef8a1a75c6127fa69541eaf8f83dd8482ddf632ad",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "runs/ppo_uav/events.out.tfevents.1748249435.lzx-MS-7D18.29030.0",
+      "archived_path": "legacy/prototype_v0/runs/ppo_uav/events.out.tfevents.1748249435.lzx-MS-7D18.29030.0",
+      "source_size_bytes": 88,
+      "archived_size_bytes": 88,
+      "source_sha256": "efec7101e80add7958cfdc1f6587e3a42c61532929942980abd4fd3f34ac7de1",
+      "archived_sha256": "efec7101e80add7958cfdc1f6587e3a42c61532929942980abd4fd3f34ac7de1",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "runs/ppo_uav/events.out.tfevents.1748250039.lzx-MS-7D18.29205.0",
+      "archived_path": "legacy/prototype_v0/runs/ppo_uav/events.out.tfevents.1748250039.lzx-MS-7D18.29205.0",
+      "source_size_bytes": 88,
+      "archived_size_bytes": 88,
+      "source_sha256": "56c3564efc22de15e07b8c9094a3e4c1149d2fef242fa874cc6be9fe8819dab2",
+      "archived_sha256": "56c3564efc22de15e07b8c9094a3e4c1149d2fef242fa874cc6be9fe8819dab2",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "runs/ppo_uav/events.out.tfevents.1748253445.lzx-MS-7D18.29787.0",
+      "archived_path": "legacy/prototype_v0/runs/ppo_uav/events.out.tfevents.1748253445.lzx-MS-7D18.29787.0",
+      "source_size_bytes": 88,
+      "archived_size_bytes": 88,
+      "source_sha256": "63c39222e3e37d19787e5fe11828936a19a9e4fd91a643c13aa1098b83f4ed54",
+      "archived_sha256": "63c39222e3e37d19787e5fe11828936a19a9e4fd91a643c13aa1098b83f4ed54",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "runs/ppo_uav/events.out.tfevents.1748254047.lzx-MS-7D18.29962.0",
+      "archived_path": "legacy/prototype_v0/runs/ppo_uav/events.out.tfevents.1748254047.lzx-MS-7D18.29962.0",
+      "source_size_bytes": 2180,
+      "archived_size_bytes": 2180,
+      "source_sha256": "d650d33cdf4c8309c314ddca3c0d4a03ce15405fd31e668100e2a4caab9b314f",
+      "archived_sha256": "d650d33cdf4c8309c314ddca3c0d4a03ce15405fd31e668100e2a4caab9b314f",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "runs/ppo_uav/events.out.tfevents.1748254074.lzx-MS-7D18.30006.0",
+      "archived_path": "legacy/prototype_v0/runs/ppo_uav/events.out.tfevents.1748254074.lzx-MS-7D18.30006.0",
+      "source_size_bytes": 2180,
+      "archived_size_bytes": 2180,
+      "source_sha256": "172441336d3e2d84c42e34deb9eea4f3274a7c030520134d4a992a85fe44a891",
+      "archived_sha256": "172441336d3e2d84c42e34deb9eea4f3274a7c030520134d4a992a85fe44a891",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "runs/ppo_uav/events.out.tfevents.1748420005.lzx-MS-7D18.77522.0",
+      "archived_path": "legacy/prototype_v0/runs/ppo_uav/events.out.tfevents.1748420005.lzx-MS-7D18.77522.0",
+      "source_size_bytes": 88,
+      "archived_size_bytes": 88,
+      "source_sha256": "b75c84d7fad7f5385f0d3c443dea9a98ca452940f3f342efacdef1c3dd9477ec",
+      "archived_sha256": "b75c84d7fad7f5385f0d3c443dea9a98ca452940f3f342efacdef1c3dd9477ec",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "training_logs.json",
+      "archived_path": "legacy/prototype_v0/training_logs.json",
+      "source_size_bytes": 88712,
+      "archived_size_bytes": 88712,
+      "source_sha256": "e9fbca5401f87b5337446f4f016dfaaaa3de76910877577f898fb7cf3df4f83e",
+      "archived_sha256": "e9fbca5401f87b5337446f4f016dfaaaa3de76910877577f898fb7cf3df4f83e",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "uav_env.py",
+      "archived_path": "legacy/prototype_v0/uav_env.py",
+      "source_size_bytes": 2396,
+      "archived_size_bytes": 2396,
+      "source_sha256": "1f23995b8539cb2cb460af46667d66c8548829b86cebda7a5107b6642f50d833",
+      "archived_sha256": "1f23995b8539cb2cb460af46667d66c8548829b86cebda7a5107b6642f50d833",
+      "archive_reason": "Original research prototype retained only for historical traceability.",
+      "replacement_entry_point": "src/uav_rl/ and scripts/ modern experiment entry points"
+    },
+    {
+      "original_path": "scripts/append_coverage_ppl_dataset.py",
+      "archived_path": "legacy/surrogate_v1_fixed_seed/append_coverage_ppl_dataset.py",
+      "source_size_bytes": 1297,
+      "archived_size_bytes": 1297,
+      "source_sha256": "77a721af55021ce0d369dc654589124356463028597fe7e5e9ce65fd7c6b99a0",
+      "archived_sha256": "77a721af55021ce0d369dc654589124356463028597fe7e5e9ce65fd7c6b99a0",
+      "archive_reason": "Fixed-seed surrogate v1 CLI replaced by the multi-seed v2 workflow.",
+      "replacement_entry_point": "scripts/build_multiseed_surrogate_dataset.py and scripts/train_surrogate_ensemble.py"
+    },
+    {
+      "original_path": "scripts/append_tail_ppl_dataset.py",
+      "archived_path": "legacy/surrogate_v1_fixed_seed/append_tail_ppl_dataset.py",
+      "source_size_bytes": 1322,
+      "archived_size_bytes": 1322,
+      "source_sha256": "83e14e9ebefffaf2a09476d163fe1b065bb2239b83ea25f1b8b9b2b1428d6bb3",
+      "archived_sha256": "83e14e9ebefffaf2a09476d163fe1b065bb2239b83ea25f1b8b9b2b1428d6bb3",
+      "archive_reason": "Fixed-seed surrogate v1 CLI replaced by the multi-seed v2 workflow.",
+      "replacement_entry_point": "scripts/build_multiseed_surrogate_dataset.py and scripts/train_surrogate_ensemble.py"
+    },
+    {
+      "original_path": "scripts/generate_ppl_dataset.py",
+      "archived_path": "legacy/surrogate_v1_fixed_seed/generate_ppl_dataset.py",
+      "source_size_bytes": 981,
+      "archived_size_bytes": 981,
+      "source_sha256": "b2f4a12e558639076d1fa64be3cbeb159f167b752e4782e87b1d04809b52921e",
+      "archived_sha256": "b2f4a12e558639076d1fa64be3cbeb159f167b752e4782e87b1d04809b52921e",
+      "archive_reason": "Fixed-seed surrogate v1 CLI replaced by the multi-seed v2 workflow.",
+      "replacement_entry_point": "scripts/build_multiseed_surrogate_dataset.py and scripts/train_surrogate_ensemble.py"
+    },
+    {
+      "original_path": "scripts/train_surrogate.py",
+      "archived_path": "legacy/surrogate_v1_fixed_seed/train_surrogate.py",
+      "source_size_bytes": 787,
+      "archived_size_bytes": 787,
+      "source_sha256": "153c0160a7c6bc6749587b1a05b449c1c4055efc16f1280225708f4f2f509dd5",
+      "archived_sha256": "153c0160a7c6bc6749587b1a05b449c1c4055efc16f1280225708f4f2f509dd5",
+      "archive_reason": "Fixed-seed surrogate v1 CLI replaced by the multi-seed v2 workflow.",
+      "replacement_entry_point": "scripts/build_multiseed_surrogate_dataset.py and scripts/train_surrogate_ensemble.py"
+    },
+    {
+      "original_path": "artifacts/cache/ppo_true_ppl.jsonl",
+      "archived_path": "artifacts/archive/2026-08-16/fixed_seed_ppo/cache/ppo_true_ppl.jsonl",
+      "source_size_bytes": 978394,
+      "archived_size_bytes": 978394,
+      "source_sha256": "f8dab428129f0dbec4d0067e1ba1bf5feb4befc0c333ca9684604fc646961aef",
+      "archived_sha256": "f8dab428129f0dbec4d0067e1ba1bf5feb4befc0c333ca9684604fc646961aef",
+      "archive_reason": "Fixed-noise-seed PPO output is not comparable to the held-out-seed protocol.",
+      "replacement_entry_point": "artifacts/*ppo_true_ppl_multiseed*"
+    },
+    {
+      "original_path": "artifacts/cache/ppo_true_ppl.jsonl.meta.json",
+      "archived_path": "artifacts/archive/2026-08-16/fixed_seed_ppo/cache/ppo_true_ppl.jsonl.meta.json",
+      "source_size_bytes": 383,
+      "archived_size_bytes": 383,
+      "source_sha256": "7f0721917fe71fef9b0b3f350edd31cfbfb774e6fb50e0c019f9ce30ec20fb08",
+      "archived_sha256": "7f0721917fe71fef9b0b3f350edd31cfbfb774e6fb50e0c019f9ce30ec20fb08",
+      "archive_reason": "Fixed-noise-seed PPO output is not comparable to the held-out-seed protocol.",
+      "replacement_entry_point": "artifacts/*ppo_true_ppl_multiseed*"
+    },
+    {
+      "original_path": "artifacts/models/ppo_true_ppl_best.pth",
+      "archived_path": "artifacts/archive/2026-08-16/fixed_seed_ppo/models/ppo_true_ppl_best.pth",
+      "source_size_bytes": 5076294,
+      "archived_size_bytes": 5076294,
+      "source_sha256": "7019651097f2b9bd5c789502118ed3e074e18e3f44b09245593f4fc719fcbd93",
+      "archived_sha256": "7019651097f2b9bd5c789502118ed3e074e18e3f44b09245593f4fc719fcbd93",
+      "archive_reason": "Fixed-noise-seed PPO output is not comparable to the held-out-seed protocol.",
+      "replacement_entry_point": "artifacts/*ppo_true_ppl_multiseed*"
+    },
+    {
+      "original_path": "artifacts/models/ppo_true_ppl_state.pth",
+      "archived_path": "artifacts/archive/2026-08-16/fixed_seed_ppo/models/ppo_true_ppl_state.pth",
+      "source_size_bytes": 20316513,
+      "archived_size_bytes": 20316513,
+      "source_sha256": "e7c14b240248b8aa33af59da642fc03770e11ec03661b19a200318ec4a3b39be",
+      "archived_sha256": "e7c14b240248b8aa33af59da642fc03770e11ec03661b19a200318ec4a3b39be",
+      "archive_reason": "Fixed-noise-seed PPO output is not comparable to the held-out-seed protocol.",
+      "replacement_entry_point": "artifacts/*ppo_true_ppl_multiseed*"
+    },
+    {
+      "original_path": "artifacts/results/ppo_true_ppl_evaluation.json",
+      "archived_path": "artifacts/archive/2026-08-16/fixed_seed_ppo/results/ppo_true_ppl_evaluation.json",
+      "source_size_bytes": 6366,
+      "archived_size_bytes": 6366,
+      "source_sha256": "32041c7c34abe4d9d5df201e73e44f8f544c9c164c240a6f6bdabb27a29dd464",
+      "archived_sha256": "32041c7c34abe4d9d5df201e73e44f8f544c9c164c240a6f6bdabb27a29dd464",
+      "archive_reason": "Fixed-noise-seed PPO output is not comparable to the held-out-seed protocol.",
+      "replacement_entry_point": "artifacts/*ppo_true_ppl_multiseed*"
+    },
+    {
+      "original_path": "artifacts/smoke/ppl.jsonl.meta.json",
+      "archived_path": "artifacts/archive/2026-08-16/smoke/smoke/ppl.jsonl.meta.json",
+      "source_size_bytes": 382,
+      "archived_size_bytes": 382,
+      "source_sha256": "c83cadd044ea0dc6229b4143283d9f4891635b6d1ef700007dddef80e8b9ec8d",
+      "archived_sha256": "c83cadd044ea0dc6229b4143283d9f4891635b6d1ef700007dddef80e8b9ec8d",
+      "archive_reason": "Short smoke-run outputs are retained but are not final experiment results.",
+      "replacement_entry_point": "Current validated experiment artifacts"
+    },
+    {
+      "original_path": "artifacts/smoke_bf16/best.pth",
+      "archived_path": "artifacts/archive/2026-08-16/smoke/smoke_bf16/best.pth",
+      "source_size_bytes": 5076047,
+      "archived_size_bytes": 5076047,
+      "source_sha256": "5685943f3d618493536c894fd248eec9a466faaf14a95aeb185857fa3267bced",
+      "archived_sha256": "5685943f3d618493536c894fd248eec9a466faaf14a95aeb185857fa3267bced",
+      "archive_reason": "Short smoke-run outputs are retained but are not final experiment results.",
+      "replacement_entry_point": "Current validated experiment artifacts"
+    },
+    {
+      "original_path": "artifacts/smoke_bf16/ppl.jsonl",
+      "archived_path": "artifacts/archive/2026-08-16/smoke/smoke_bf16/ppl.jsonl",
+      "source_size_bytes": 7720,
+      "archived_size_bytes": 7720,
+      "source_sha256": "1ba261db7a171162f02939f52f7b505896c78db21d44ad11b8d03ef1df311a2b",
+      "archived_sha256": "1ba261db7a171162f02939f52f7b505896c78db21d44ad11b8d03ef1df311a2b",
+      "archive_reason": "Short smoke-run outputs are retained but are not final experiment results.",
+      "replacement_entry_point": "Current validated experiment artifacts"
+    },
+    {
+      "original_path": "artifacts/smoke_bf16/ppl.jsonl.meta.json",
+      "archived_path": "artifacts/archive/2026-08-16/smoke/smoke_bf16/ppl.jsonl.meta.json",
+      "source_size_bytes": 383,
+      "archived_size_bytes": 383,
+      "source_sha256": "7f0721917fe71fef9b0b3f350edd31cfbfb774e6fb50e0c019f9ce30ec20fb08",
+      "archived_sha256": "7f0721917fe71fef9b0b3f350edd31cfbfb774e6fb50e0c019f9ce30ec20fb08",
+      "archive_reason": "Short smoke-run outputs are retained but are not final experiment results.",
+      "replacement_entry_point": "Current validated experiment artifacts"
+    },
+    {
+      "original_path": "artifacts/smoke_bf16/result.json",
+      "archived_path": "artifacts/archive/2026-08-16/smoke/smoke_bf16/result.json",
+      "source_size_bytes": 4425,
+      "archived_size_bytes": 4425,
+      "source_sha256": "20ecfda1e9a34b98b8c3172a93e8356b8c75d377673aa1a01198b9753a34e6e6",
+      "archived_sha256": "20ecfda1e9a34b98b8c3172a93e8356b8c75d377673aa1a01198b9753a34e6e6",
+      "archive_reason": "Short smoke-run outputs are retained but are not final experiment results.",
+      "replacement_entry_point": "Current validated experiment artifacts"
+    },
+    {
+      "original_path": "artifacts/smoke_bf16/result_resumed.json",
+      "archived_path": "artifacts/archive/2026-08-16/smoke/smoke_bf16/result_resumed.json",
+      "source_size_bytes": 4533,
+      "archived_size_bytes": 4533,
+      "source_sha256": "5de3d9ff0c0db1ae11601a344f6f634530155e82a95f7ad559f3b59559dced3c",
+      "archived_sha256": "5de3d9ff0c0db1ae11601a344f6f634530155e82a95f7ad559f3b59559dced3c",
+      "archive_reason": "Short smoke-run outputs are retained but are not final experiment results.",
+      "replacement_entry_point": "Current validated experiment artifacts"
+    },
+    {
+      "original_path": "artifacts/smoke_bf16/state.pth",
+      "archived_path": "artifacts/archive/2026-08-16/smoke/smoke_bf16/state.pth",
+      "source_size_bytes": 20314988,
+      "archived_size_bytes": 20314988,
+      "source_sha256": "f6af280e24ca4847f7ede2b4b19195710ee92044ae1d123961569a1ebb39f65a",
+      "archived_sha256": "f6af280e24ca4847f7ede2b4b19195710ee92044ae1d123961569a1ebb39f65a",
+      "archive_reason": "Short smoke-run outputs are retained but are not final experiment results.",
+      "replacement_entry_point": "Current validated experiment artifacts"
+    },
+    {
+      "original_path": "artifacts/ppo_true_ppl_multiseed_resume_stderr.log",
+      "archived_path": "artifacts/archive/2026-08-16/multiseed_attempt_logs/ppo_true_ppl_multiseed_resume_stderr.log",
+      "source_size_bytes": 237,
+      "archived_size_bytes": 237,
+      "source_sha256": "9f9f781b3c6f9ab444d84f3e14a3fef769c74668bb1201bf2a3429e18686d5ed",
+      "archived_sha256": "9f9f781b3c6f9ab444d84f3e14a3fef769c74668bb1201bf2a3429e18686d5ed",
+      "archive_reason": "Interrupted or superseded multi-seed launch logs and temporary runner.",
+      "replacement_entry_point": "artifacts/ppo_true_ppl_multiseed_scheduled_{stdout,stderr}.log"
+    },
+    {
+      "original_path": "artifacts/ppo_true_ppl_multiseed_resume_stdout.log",
+      "archived_path": "artifacts/archive/2026-08-16/multiseed_attempt_logs/ppo_true_ppl_multiseed_resume_stdout.log",
+      "source_size_bytes": 3517,
+      "archived_size_bytes": 3517,
+      "source_sha256": "8f9ec33b047190feefcdd2d49e7916b535bcb3402d2362af7cbd166c7ddf74fe",
+      "archived_sha256": "8f9ec33b047190feefcdd2d49e7916b535bcb3402d2362af7cbd166c7ddf74fe",
+      "archive_reason": "Interrupted or superseded multi-seed launch logs and temporary runner.",
+      "replacement_entry_point": "artifacts/ppo_true_ppl_multiseed_scheduled_{stdout,stderr}.log"
+    },
+    {
+      "original_path": "artifacts/ppo_true_ppl_multiseed_scheduled.log",
+      "archived_path": "artifacts/archive/2026-08-16/multiseed_attempt_logs/ppo_true_ppl_multiseed_scheduled.log",
+      "source_size_bytes": 1982,
+      "archived_size_bytes": 1982,
+      "source_sha256": "4992860925ce694cdf5cad285c4ac60ebf019302edf6062f7a6f512973e6aaa7",
+      "archived_sha256": "4992860925ce694cdf5cad285c4ac60ebf019302edf6062f7a6f512973e6aaa7",
+      "archive_reason": "Interrupted or superseded multi-seed launch logs and temporary runner.",
+      "replacement_entry_point": "artifacts/ppo_true_ppl_multiseed_scheduled_{stdout,stderr}.log"
+    },
+    {
+      "original_path": "artifacts/ppo_true_ppl_multiseed_stderr.log",
+      "archived_path": "artifacts/archive/2026-08-16/multiseed_attempt_logs/ppo_true_ppl_multiseed_stderr.log",
+      "source_size_bytes": 149,
+      "archived_size_bytes": 149,
+      "source_sha256": "a9b5fd053b3f7245f219dba2b19d88492dfac96a55266f34958609561a1e503e",
+      "archived_sha256": "a9b5fd053b3f7245f219dba2b19d88492dfac96a55266f34958609561a1e503e",
+      "archive_reason": "Interrupted or superseded multi-seed launch logs and temporary runner.",
+      "replacement_entry_point": "artifacts/ppo_true_ppl_multiseed_scheduled_{stdout,stderr}.log"
+    },
+    {
+      "original_path": "artifacts/ppo_true_ppl_multiseed_stdout.log",
+      "archived_path": "artifacts/archive/2026-08-16/multiseed_attempt_logs/ppo_true_ppl_multiseed_stdout.log",
+      "source_size_bytes": 3298,
+      "archived_size_bytes": 3298,
+      "source_sha256": "4b7ec466ed1578a4bdf179f6adf841d69aa1dd844cce65ee79c8ed806e841a9e",
+      "archived_sha256": "4b7ec466ed1578a4bdf179f6adf841d69aa1dd844cce65ee79c8ed806e841a9e",
+      "archive_reason": "Interrupted or superseded multi-seed launch logs and temporary runner.",
+      "replacement_entry_point": "artifacts/ppo_true_ppl_multiseed_scheduled_{stdout,stderr}.log"
+    },
+    {
+      "original_path": "artifacts/run_multiseed_resume.ps1",
+      "archived_path": "artifacts/archive/2026-08-16/multiseed_attempt_logs/run_multiseed_resume.ps1",
+      "source_size_bytes": 1029,
+      "archived_size_bytes": 1029,
+      "source_sha256": "18efacfa7f8ec0343c089c9eefbae88c133bf21e00f019d42d313b470075c9ad",
+      "archived_sha256": "18efacfa7f8ec0343c089c9eefbae88c133bf21e00f019d42d313b470075c9ad",
+      "archive_reason": "Interrupted or superseded multi-seed launch logs and temporary runner.",
+      "replacement_entry_point": "artifacts/ppo_true_ppl_multiseed_scheduled_{stdout,stderr}.log"
+    },
+    {
+      "original_path": "artifacts/surrogate_multiseed_v2_ensemble_pre_strict_failed_stderr.log",
+      "archived_path": "artifacts/archive/2026-08-16/multiseed_attempt_logs/surrogate_multiseed_v2_ensemble_pre_strict_failed_stderr.log",
+      "source_size_bytes": 1006,
+      "archived_size_bytes": 1006,
+      "source_sha256": "5f7d1deb0b5aa01f0978dfdfcc3bb386f514828015efb721a59c7cfbef6c7034",
+      "archived_sha256": "5f7d1deb0b5aa01f0978dfdfcc3bb386f514828015efb721a59c7cfbef6c7034",
+      "archive_reason": "Superseded ensemble launch used the generator's placeholder manifest before strict context reconstruction.",
+      "replacement_entry_point": "scripts/finalize_surrogate_v2.py and artifacts/surrogate_multiseed_v2_ensemble_{stdout,stderr}.log"
+    },
+    {
+      "original_path": "artifacts/surrogate_multiseed_v2_ensemble_pre_strict_failed_stdout.log",
+      "archived_path": "artifacts/archive/2026-08-16/multiseed_attempt_logs/surrogate_multiseed_v2_ensemble_pre_strict_failed_stdout.log",
+      "source_size_bytes": 0,
+      "archived_size_bytes": 0,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "archived_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "archive_reason": "Superseded ensemble launch used the generator's placeholder manifest before strict context reconstruction.",
+      "replacement_entry_point": "scripts/finalize_surrogate_v2.py and artifacts/surrogate_multiseed_v2_ensemble_{stdout,stderr}.log"
+    }
+  ]
+}

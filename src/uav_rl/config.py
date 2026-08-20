@@ -43,6 +43,7 @@ class DataGenerationConfig:
     dataset_name: str = "wikitext"
     dataset_config: str = "wikitext-2-raw-v1"
     dataset_split: str = "test"
+    dataset_arrow_file: str | None = None
     text_sample_limit: int = 50
     max_length: int = 512
     batch_size: int = 4
@@ -71,14 +72,37 @@ class PPOConfig:
     teacher_seed: int = 20260814
     behavior_cloning_epochs: int = 60
     behavior_cloning_learning_rate: float = 3e-4
+    teacher_relative_rewards: bool = False
+    online_behavior_cloning_coefficient: float = 0.0
     validation_channels: int = 256
     validation_seed: int = 20260813
     validation_interval: int = 4
     test_channels: int = 256
     test_seed: int = 20260811
+    training_noise_samples: int = 4
+    training_noise_seed: int = 20260815
+    validation_noise_samples: int = 16
+    validation_noise_seed: int = 20260816
+    test_noise_samples: int = 16
+    test_noise_seed: int = 20260817
     system: SystemConfig = field(default_factory=SystemConfig)
 
     def __post_init__(self) -> None:
         experiment_seeds = {self.teacher_seed, self.validation_seed, self.test_seed}
         if len(experiment_seeds) != 3:
             raise ValueError("teacher, validation, and test seeds must be distinct")
+        noise_generator_seeds = {
+            self.training_noise_seed,
+            self.validation_noise_seed,
+            self.test_noise_seed,
+        }
+        if len(noise_generator_seeds) != 3:
+            raise ValueError("training, validation, and test noise generator seeds must be distinct")
+        if min(
+            self.training_noise_samples,
+            self.validation_noise_samples,
+            self.test_noise_samples,
+        ) < 1:
+            raise ValueError("all noise sample counts must be positive")
+        if self.online_behavior_cloning_coefficient < 0.0:
+            raise ValueError("online behavior-cloning coefficient cannot be negative")

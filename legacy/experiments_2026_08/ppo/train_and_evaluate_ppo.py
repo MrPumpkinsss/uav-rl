@@ -7,26 +7,14 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-import numpy as np
-
 from uav_rl.config import PPOConfig, SystemConfig
-from uav_rl.deployment import random_continuous_deployment
 from uav_rl.evaluation import evaluate_methods
+from uav_rl.experiment import estimate_latency_reference
+from uav_rl.quality import SurrogateQualityEvaluator
 from uav_rl.rl import DeploymentEnvironment, PPOTrainer
 from uav_rl.rl.environment import generate_channels
 from uav_rl.rl.oracle import LocalFourSegmentQualityModel
 from uav_rl.surrogate import load_surrogate
-from uav_rl.wireless import collaborative_latency, sample_channel
-
-
-def estimate_latency_reference(config: SystemConfig, seed: int, samples: int = 1024) -> float:
-    rng = np.random.default_rng(seed)
-    latencies = []
-    for _ in range(samples):
-        channel = sample_channel(rng, config)
-        deployment = random_continuous_deployment(rng, config)
-        latencies.append(collaborative_latency(deployment, channel, config).total_seconds)
-    return float(np.mean(latencies))
 
 
 def main() -> None:
@@ -90,7 +78,11 @@ def main() -> None:
     clean_perplexity = float(metadata["clean_perplexity"])
     surrogate = load_surrogate(args.surrogate)
     latency_reference = estimate_latency_reference(system, config.seed)
-    environment = DeploymentEnvironment(system, surrogate, latency_reference)
+    environment = DeploymentEnvironment(
+        system,
+        SurrogateQualityEvaluator(surrogate),
+        latency_reference,
+    )
     teacher_quality_model = (
         LocalFourSegmentQualityModel.from_dataset(
             str(args.teacher_quality_dataset),
