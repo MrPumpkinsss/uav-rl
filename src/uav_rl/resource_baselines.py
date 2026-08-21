@@ -227,6 +227,96 @@ def proxy_beam_baseline(
 
 
 
+def _local_search_neighbors(
+    deployment: np.ndarray,
+    channel: np.ndarray,
+    config: ResourceConstrainedConfig,
+) -> np.ndarray:
+    """Generate feasible one-step neighbors around an arbitrary deployment."""
+
+    values = np.asarray(deployment, dtype=np.int64)
+    system = config.system
+    candidates: set[tuple[int, ...]] = set()
+
+    # Move one layer to another UAV. This also shifts a boundary by one layer.
+    for layer_index in range(system.num_layers):
+        current_uav = int(values[layer_index])
+        for uav in range(system.num_uavs):
+            if uav == current_uav:
+                continue
+            candidate = values.copy()
+            candidate[layer_index] = uav
+            try:
+                validate_layerwise_deployment(candidate, config, channel=channel)
+            except ValueError:
+                continue
+            candidates.add(tuple(int(item) for item in candidate))
+
+    # Move a whole contiguous run to another UAV. Adjacent runs may merge.
+    starts = [0]
+    starts.extend((np.flatnonzero(values[:-1] != values[1:]) + 1).tolist())
+    ends = starts[1:] + [system.num_layers]
+    for start, end in zip(starts, ends, strict=True):
+        current_uav = int(values[start])
+        for uav in range(system.num_uavs):
+            if uav == current_uav:
+                continue
+            candidate = values.copy()
+            candidate[start:end] = uav
+            try:
+                validate_layerwise_deployment(candidate, config, channel=channel)
+            except ValueError:
+                continue
+            candidates.add(tuple(int(item) for item in candidate))
+
+    if not candidates:
+        return np.empty((0, system.num_layers), dtype=np.int64)
+    return np.asarray(sorted(candidates), dtype=np.int64)
+
+
+def proxy_beam_surrogate_local_search(
+    channels: np.ndarray,
+    config: ResourceConstrainedConfig,
+    environment: ResourceDeploymentEnvironment,
+    latency_reference: float,
+    *,
+    beam_width: int = 512,
+    rounds: int = 3,
+) -> np.ndarray:
+    """Improve a wide proxy-beam deployment with surrogate-guided local search.
+
+    The proxy beam supplies the initial arbitrary assignment. Each local-search
+    round evaluates feasible one-layer and one-run neighbors with the frozen
+    surrogate plus exact analytic latency, then accepts the best improvement.
+    No true CodeLlama call is made by this function.
+    """
+
+    if rounds < 0:
+        raise ValueError("rounds cannot be negative")
+    initial = proxy_beam_baseline(
+        channels, config, latency_reference, beam_width=beam_width
+    )
+    selected: list[np.ndarray] = []
+    for channel, deployment in zip(np.asarray(channels), initial, strict=True):
+        current = np.asarray(deployment, dtype=np.int64).copy()
+        current_rewards, _ = environment.evaluate(
+            channel[None, :, :], current[None, :]
+        )
+        current_reward = float(current_rewards[0])
+        for _ in range(rounds):
+            neighbors = _local_search_neighbors(current, channel, config)
+            if len(neighbors) == 0:
+                break
+            repeated_channels = np.repeat(channel[None, :, :], len(neighbors), axis=0)
+            rewards, _ = environment.evaluate(repeated_channels, neighbors)
+            best_index = int(np.argmax(rewards))
+            best_reward = float(rewards[best_index])
+            if best_reward <= current_reward + 1e-8:
+                break
+            current = neighbors[best_index].copy()
+            current_reward = best_reward
+        selected.append(current)
+    return np.stack(selected)
 def dynamic_programming_proxy_cost(
     deployment: np.ndarray,
     channel: np.ndarray,
@@ -393,4 +483,5 @@ __all__ = [
     "proxy_beam_baseline",
     "dynamic_programming_proxy_cost",
     "dynamic_programming_baseline",
+    "proxy_beam_surrogate_local_search",
 ]

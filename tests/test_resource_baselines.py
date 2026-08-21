@@ -9,9 +9,12 @@ import pytest
 
 from uav_rl.config import SystemConfig
 from uav_rl.resource_assignment import ResourceConstrainedConfig, validate_layerwise_deployment
+from uav_rl.resource_environment import ResourceDeploymentEnvironment
 from uav_rl.resource_baselines import (
     dynamic_programming_baseline,
     dynamic_programming_proxy_cost,
+    proxy_beam_baseline,
+    proxy_beam_surrogate_local_search,
 )
 
 
@@ -85,3 +88,40 @@ def test_dynamic_programming_resource_baseline_matches_small_bruteforce() -> Non
     )
 
     assert dp_cost == pytest.approx(brute_force_cost)
+class _DropSumQuality:
+    def evaluate(self, drop_probabilities: np.ndarray, *, noise_seeds=None) -> np.ndarray:
+        del noise_seeds
+        return np.asarray(drop_probabilities, dtype=np.float32).sum(axis=1)
+
+
+def test_wide_beam_and_surrogate_local_search_are_feasible_and_non_degrading() -> None:
+    config = _small_config()
+    channel = np.asarray(
+        [
+            [20.0, 3.0, 15.0],
+            [3.0, 20.0, 8.0],
+            [15.0, 8.0, 20.0],
+        ],
+        dtype=np.float32,
+    )
+    channels = channel[None, ...]
+    latency_reference = 0.8
+    environment = ResourceDeploymentEnvironment(
+        config, _DropSumQuality(), latency_reference
+    )
+
+    wide = proxy_beam_baseline(channels, config, latency_reference, beam_width=8)
+    improved = proxy_beam_surrogate_local_search(
+        channels,
+        config,
+        environment,
+        latency_reference,
+        beam_width=8,
+        rounds=2,
+    )
+    initial_rewards, _ = environment.evaluate(channels, wide)
+    improved_rewards, _ = environment.evaluate(channels, improved)
+
+    validate_layerwise_deployment(improved[0], config, channel=channel)
+    assert improved.shape == wide.shape == (1, config.system.num_layers)
+    assert float(improved_rewards[0]) >= float(initial_rewards[0]) - 1e-8

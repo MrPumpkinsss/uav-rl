@@ -442,12 +442,12 @@ reward 是负的综合代价，因此越接近 0 越好；PPL 和 latency 越小
 | **High-augmented PPO Top-1** | **当前推荐：surrogate PPO + Top-K** | **-0.400744** | 16.735 | 0.713 | — |
 | PPO Top-5 true oracle | 候选集真实模型上界（不可部署） | **-0.391821** | 16.407 | 0.714 | +2.23% |
 | Proxy beam 128 | 非 PPO beam search | -0.419458 | 17.567 | **0.701** | -4.67% |
+| **Surrogate local search** | **beam 512 初始化 + surrogate 局部搜索** | **-0.411060** | 17.245 | 0.704 | -2.57% |
+| Wide proxy beam 512 | beam search（宽度 512） | -0.421463 | 17.658 | 0.700 | -5.17% |
 | PPO deterministic | 同一 PPO policy 的确定性 rollout | -0.428221 | 17.728 | 0.722 | -6.86% |
 | Fixed-eight Strong-link | 历史固定分段：32 层先切成 4 段，每段 8 层，再按通信链路质量分配 UAV | -0.475804 | **15.310** | 1.027 | -18.73% |
-| Fixed-eight additive proxy | 历史固定分段：每段 8 层，再用“丢包 + 延迟”加性近似分数选 UAV | -0.475507 | 15.431 | 1.015 | -18.66% |
 | **Dynamic programming** | **可变长度连续区块；当前资源模型下的 DP 加性 proxy** | **-0.480867** | 15.619 | 1.014 | -19.99% |
 | Surrogate random search 1024 | 1024 个可行 assignment 的 surrogate 搜索 | -0.488966 | 16.232 | 0.991 | -22.01% |
-| Fixed-eight Compute-greedy | 历史固定分段：每段 8 层，优先交给计算速度更快的 UAV | -0.641694 | 21.970 | 1.067 | -60.13% |
 | Random feasible | 随机可行 assignment | -3.383793 | 860.959 | 5.289 | -744.38% |
 
 ### 各个方法到底在做什么
@@ -456,6 +456,8 @@ reward 是负的综合代价，因此越接近 0 越好；PPL 和 latency 越小
 - **PPO deterministic**：使用同一个训练好的 PPO policy，但每一步都只选概率最高的 UAV，不生成多个候选，用来衡量 Top-K 候选机制是否有帮助。
 - **PPO Top-5 true oracle**：先让 PPO 生成 5 个候选，再用真实 CodeLlama 逐个计算，从中选真实 reward 最好的一个。它是候选集合的上界，但需要事后运行 5 次真实模型，因此不可部署。
 - **Proxy beam 128**：不训练 PPO，而是从第 1 层开始逐层扩展任意 layer-to-UAV assignment，每一轮只保留近似分数最好的 128 条部分路径，最后再用真实 CodeLlama 评估完整方案。它允许在任意层切换 UAV，是当前最强的非 PPO 对照之一。
+- **Wide proxy beam 512**：与 beam 128 使用相同的逐层任意 assignment 搜索，但保留 512 条部分路径。它不再受固定四段或每段八层限制；搜索阶段只用解析 proxy，不调用真实 CodeLlama。
+- **Surrogate local search**：先用 beam 512 生成可行初始方案，再用 frozen surrogate reward 和解析 latency 做 3 轮局部改进，尝试单层迁移和连续区块迁移。它仍然只在最终统一 benchmark 阶段调用真实 CodeLlama。
 - **Fixed-eight Strong-link（历史固定分段 + 链路优先）**：这是最早的一类固定结构 baseline。它先把 32 层强制切成 4 个连续区块，每个区块正好 8 层，再把这 4 个区块交给 4 台不同的 UAV。当前配置有 5 台 UAV，所以会有 1 台不参与部署。因为有 5 台 UAV、需要按顺序选择其中 4 台，所以最多有 `5 × 4 × 3 × 2 = 120` 种区块分配顺序；之后再删除违反 memory/energy 约束的方案，并只根据 3 次区块之间的跨 UAV 链路丢包近似值选择顺序。它不能改变区块边界，也不能自由决定使用几台 UAV；通常能得到较低 PPL，但可能带来较高的通信和分段延迟。
 
   示意如下：
@@ -468,8 +470,6 @@ reward 是负的综合代价，因此越接近 0 越好；PPL 和 latency 越小
   ```
 
 - **Dynamic programming（可变长度连续区块）**：这是当前资源模型下新增的 DP baseline。它不固定 4×8 层，而是在任意 layer 之间选择 boundary，每个区块长度可以不同（不超过 8 层），并从 4 或 5 台不同 UAV 中选择区块顺序；先用“边界丢包总量 + 归一化总延迟”的加性 proxy 做动态规划，再用真实 CodeLlama 评估最终 reward。它比 fixed-eight 更灵活，但仍不允许后续切回已经使用过的 UAV，也不直接优化真实非线性 PPL，所以不能与 PPO 的完整逐层策略等同。
-- **Fixed-eight Compute-greedy（历史固定分段 + 计算优先）**：使用同样的 4 个、每个 8 层的固定区块，但优先把区块交给计算速度更快的 UAV。它主要考虑计算速度，不会系统地平衡通信质量和端到端延迟。
-- **Fixed-eight additive proxy（历史固定分段 + 透明加性排序）**：仍使用固定的 4×8 层结构，在固定候选中按“边界丢包总量 + 归一化总延迟”的加性近似分数选方案；这里的总延迟包含层计算和跨 UAV 通信延迟。它不是 neural surrogate，也不进行 PPO 学习；历史结果 JSON 中仍保留 `fixed_eight_surrogate_proxy` 这个旧 method key，但该名称不代表它调用了 surrogate checkpoint。
 - **Surrogate random search 1024**：每个 channel 随机生成 1024 个资源可行的任意 assignment，用 surrogate reward 选最优者，不做 PPO policy learning。
 - **Random feasible**：只保证 memory/energy 可行，不使用质量或 latency 目标。
 
@@ -477,13 +477,14 @@ reward 是负的综合代价，因此越接近 0 越好；PPL 和 latency 越小
 
 ### 实验分析
 
-1. **当前 PPO 是本协议下最好的可执行策略。** Top-1 PPO 比最强非 PPO baseline `proxy_beam_128` 高 `0.018715` reward，约高 `4.67%`。
+1. **当前 PPO 仍是本协议下最好的可执行策略。** Top-1 PPO 的 reward 为 `-0.400744`；最强非 PPO baseline 是 surrogate local search（`-0.411060`），低约 `2.57%`。
 2. **Top-K 主要减少随机 rollout 的选择误差。** 同一组 5 个候选的真实 oracle 只比 surrogate-selected Top-1 高 `0.008923`，说明 surrogate 排序保留了大部分候选收益，但仍有少量排序错误。
 3. **确定性 policy 不如 Top-K。** deterministic PPO 比 Top-1 低 `6.86%`，说明只取单条 greedy rollout 会丢掉 policy 分布中的有价值候选。
 4. **只优化链路质量并不等于 reward 最优。** Strong-link 的 PPL 最低，但 latency 约为 PPO 的 1.44 倍；当前 reward 同时考虑质量和 latency，因此总 reward 反而更差。这里 reward 是负的综合代价，所以越接近 0 越好。
-5. **动作空间更灵活不等于 proxy 结果一定更好。** 新增 DP 可以改变 boundary 位置和区块长度，但真实 reward 为 `-0.480867`，低于 PPO，也略低于 fixed-eight Strong-link；这是因为 DP 优化的是加性丢包/延迟 proxy，而真实 CodeLlama PPL 影响是非线性的。
+5. **更宽的 beam 不保证真实 reward 更好。** beam 512 的真实 reward 为 `-0.421463`，略低于 beam 128 的 `-0.419458`；说明 proxy 排序存在误差，单纯增加 beam 宽度不能替代更准确的候选评价。
 6. **PPO 学到的是 channel-conditioned assignment policy，而不是独立随机搜索。** surrogate random search 1024 仍低于 PPO，说明 PPO 学到的逐层决策和资源状态建模比独立采样更有效。
-7. **结果不能跨协议直接混比。** 之前的 direct true-PPL PPO 报告使用了另一组 64 test channels、16 noise seeds 和不同训练流程，不能把它的 `-0.953925` 与本表的 `-0.400744` 当作同一测试集上的直接排名；它属于“真实 PPL 训练 vs surrogate PPO”的独立对照实验。
+7. **local search 有小幅收益但仍不超过 PPO。** 它从 beam 512 出发，用 frozen surrogate 和解析 latency 尝试单层/连续区块迁移，真实 reward 比 beam 512 提高约 `2.47%`，但仍低于 PPO Top-1。
+8. **结果不能跨协议直接混比。** 之前的 direct true-PPL PPO 报告使用了另一组 64 test channels、16 noise seeds 和不同训练流程，不能把它的 `-0.953925` 与本表的 `-0.400744` 当作同一测试集上的直接排名；它属于“真实 PPL 训练 vs surrogate PPO”的独立对照实验。
 
 当前结论应写成：**在统一 common-seed、真实 CodeLlama、32 channels/4 noise seeds 的评估中，high-augmented surrogate-trained Top-K PPO 是当前最好的可执行 PPO policy；它仍然落后于不可部署的 Top-5 true oracle，且并不意味着 surrogate 本身在所有 tail 区域都已达到低绝对误差。**
 ## 实验复现与可信度检查

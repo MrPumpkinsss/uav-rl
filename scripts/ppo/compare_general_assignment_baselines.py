@@ -24,6 +24,7 @@ from uav_rl.resource_baselines import (
     dynamic_programming_baseline,
     fixed_eight_proxy_baseline,
     proxy_beam_baseline,
+    proxy_beam_surrogate_local_search,
     random_feasible_baseline,
     surrogate_random_search,
 )
@@ -106,6 +107,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--candidate-samples", type=int, default=20)
     parser.add_argument("--proxy-beam-width", type=int, default=128)
+    parser.add_argument("--wide-proxy-beam-width", type=int, default=512)
+    parser.add_argument("--local-search-rounds", type=int, default=3)
     parser.add_argument("--surrogate-search-candidates", type=int, default=1024)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--allow-overwrite", action="store_true")
@@ -116,6 +119,8 @@ def main() -> None:
     args = parse_args()
     if min(args.channels, args.noise_samples, args.top_k, args.candidate_samples) < 1:
         raise ValueError("channels, noise samples, Top-K, and candidate samples must be positive")
+    if args.proxy_beam_width < 1 or args.wide_proxy_beam_width < 1 or args.local_search_rounds < 0:
+        raise ValueError("beam widths must be positive and local-search rounds cannot be negative")
     output = args.output or args.run_dir / "common_seed_baseline_comparison.json"
     cache = args.cache or args.run_dir / "common_seed_baseline_cache.jsonl"
     checkpoint = args.checkpoint or args.run_dir / "best_policy.pth"
@@ -152,12 +157,15 @@ def main() -> None:
         "dynamic_programming": dynamic_programming_baseline(
             channels, resource_config, latency_reference
         ),
+        "proxy_beam_512": proxy_beam_baseline(
+            channels, resource_config, latency_reference,
+            beam_width=args.wide_proxy_beam_width,
+        ),
         "fixed_eight_strong_link": fixed_eight_proxy_baseline(
             channels, resource_config, latency_reference, score="strong_link"
         ),
-        "fixed_eight_compute_greedy": fixed_eight_proxy_baseline(
-            channels, resource_config, latency_reference, score="compute"
-        ),
+
+
         "proxy_beam_128": proxy_beam_baseline(
             channels, resource_config, latency_reference, beam_width=args.proxy_beam_width
         ),
@@ -170,13 +178,17 @@ def main() -> None:
             seed=20260827,
             candidates_per_channel=args.surrogate_search_candidates,
         ),
+        "proxy_beam_surrogate_local_search": proxy_beam_surrogate_local_search(
+            channels,
+            resource_config,
+            surrogate_environment,
+            latency_reference,
+            beam_width=args.wide_proxy_beam_width,
+            rounds=args.local_search_rounds,
+        ),
     }
-    # The fixed-eight surrogate oracle is an interpretable upper bound for the
-    # old baseline family; it is evaluated with the same surrogate environment.
-    fixed_eight_surrogate = fixed_eight_proxy_baseline(
-        channels, resource_config, latency_reference, score="proxy"
-    )
-    methods["fixed_eight_surrogate_proxy"] = fixed_eight_surrogate
+
+
 
     evaluator = TruePPLQualityEvaluator(
         DataGenerationConfig(), device_name=args.device, cache_path=cache, progress_interval=32
@@ -232,6 +244,8 @@ def main() -> None:
         "top_k": args.top_k,
         "candidate_samples": args.candidate_samples,
         "proxy_beam_width": args.proxy_beam_width,
+        "wide_proxy_beam_width": args.wide_proxy_beam_width,
+        "local_search_rounds": args.local_search_rounds,
         "surrogate_search_candidates": args.surrogate_search_candidates,
         "clean_perplexity": evaluator.clean_perplexity,
         "evaluated_sequences": evaluator.evaluated_sequences,
