@@ -226,10 +226,171 @@ def proxy_beam_baseline(
     return np.stack(result)
 
 
+
+def dynamic_programming_proxy_cost(
+    deployment: np.ndarray,
+    channel: np.ndarray,
+    config: ResourceConstrainedConfig,
+    latency_reference: float,
+) -> float:
+    """Return the additive proxy minimized by the continuous-segment DP.
+
+    The proxy is used only to select an action.  It sums per-layer compute
+    latency and independent full-bandwidth latency at each boundary, plus the
+    boundary drop probabilities.  Final evaluation still uses the unchanged
+    shared-bandwidth resource model and the true CodeLlama evaluator.
+    """
+
+    if latency_reference <= 0.0:
+        raise ValueError("latency_reference must be positive")
+    values = np.asarray(deployment, dtype=np.int64)
+    validate_layerwise_deployment(values, config, channel=channel)
+    system = config.system
+    speeds = np.asarray(system.compute_speed, dtype=np.float64)
+    compute_seconds = np.asarray(config.layer_compute_seconds_at_unit_speed, dtype=np.float64)
+    computation = float(np.sum(compute_seconds / speeds[values]))
+    transition_drop = 0.0
+    transition_latency = 0.0
+    activation = np.asarray(config.activation_mbit_by_boundary, dtype=np.float64)
+    for boundary in np.flatnonzero(values[:-1] != values[1:]):
+        sender = int(values[boundary])
+        receiver = int(values[boundary + 1])
+        gain = float(channel[sender, receiver])
+        spectral_efficiency = np.log2(
+            1.0 + system.transmit_power * gain / system.noise_power
+        )
+        transition_drop += packet_drop_probability(gain, system)
+        transition_latency += activation[boundary] / (
+            system.total_bandwidth_mhz * spectral_efficiency
+        )
+    return float(
+        system.quality_weight * transition_drop
+        + (1.0 - system.quality_weight)
+        * (computation + transition_latency)
+        / latency_reference
+    )
+
+
+def _dynamic_programming_deployment(
+    channel: np.ndarray,
+    config: ResourceConstrainedConfig,
+    latency_reference: float,
+) -> np.ndarray:
+    """Find the best feasible variable-length contiguous-segment deployment.
+
+    The recurrence chooses an unused UAV and the length of its next segment.
+    Unlike fixed-eight baselines, segment boundaries may occur at any layer and
+    the DP may use four or five distinct UAVs.  We retain complete transition
+    paths because exact shared-bandwidth energy feasibility is checked only at
+    the terminal deployment.
+    """
+
+    if latency_reference <= 0.0:
+        raise ValueError("latency_reference must be positive")
+    system = config.system
+    layers = system.num_layers
+    max_segment = system.max_layers_per_uav
+    memory_profile = np.asarray(config.layer_memory_units, dtype=np.float64)
+    capacities = np.asarray(config.uav_memory_capacity_units, dtype=np.float64)
+    speeds = np.asarray(system.compute_speed, dtype=np.float64)
+    compute_seconds = np.asarray(config.layer_compute_seconds_at_unit_speed, dtype=np.float64)
+    activation = np.asarray(config.activation_mbit_by_boundary, dtype=np.float64)
+    best: tuple[float, np.ndarray] | None = None
+
+    def visit(
+        assigned_layers: int,
+        used_mask: int,
+        previous_uav: int,
+        parts: tuple[np.ndarray, ...],
+        cost: float,
+    ) -> None:
+        nonlocal best
+        if assigned_layers == layers:
+            candidate = np.concatenate(parts).astype(np.int64, copy=False)
+            try:
+                validate_layerwise_deployment(candidate, config, channel=channel)
+            except ValueError:
+                return
+            if best is None or cost < best[0]:
+                best = (cost, candidate.copy())
+            return
+
+        unused_uavs = system.num_uavs - used_mask.bit_count()
+        if layers - assigned_layers > unused_uavs * max_segment:
+            return
+        for uav in range(system.num_uavs):
+            if used_mask & (1 << uav):
+                continue
+            for segment_length in range(1, max_segment + 1):
+                end = assigned_layers + segment_length
+                if end > layers:
+                    break
+                segment_memory = float(memory_profile[assigned_layers:end].sum())
+                if segment_memory > capacities[uav] + 1e-9:
+                    break
+                remaining_layers = layers - end
+                remaining_uavs = unused_uavs - 1
+                if remaining_layers > remaining_uavs * max_segment:
+                    continue
+
+                segment_cost = float(
+                    (1.0 - system.quality_weight)
+                    * np.sum(compute_seconds[assigned_layers:end] / speeds[uav])
+                    / latency_reference
+                )
+                if previous_uav >= 0:
+                    boundary = assigned_layers - 1
+                    gain = float(channel[previous_uav, uav])
+                    spectral_efficiency = np.log2(
+                        1.0 + system.transmit_power * gain / system.noise_power
+                    )
+                    segment_cost += system.quality_weight * packet_drop_probability(
+                        gain, system
+                    )
+                    segment_cost += (
+                        (1.0 - system.quality_weight)
+                        * activation[boundary]
+                        / (system.total_bandwidth_mhz * spectral_efficiency)
+                        / latency_reference
+                    )
+                visit(
+                    end,
+                    used_mask | (1 << uav),
+                    uav,
+                    parts + (np.full(segment_length, uav, dtype=np.int64),),
+                    cost + segment_cost,
+                )
+
+    visit(0, 0, -1, (), 0.0)
+    if best is None:
+        raise RuntimeError("dynamic programming found no feasible deployment")
+    return best[1]
+
+
+def dynamic_programming_baseline(
+    channels: np.ndarray,
+    config: ResourceConstrainedConfig,
+    latency_reference: float,
+) -> np.ndarray:
+    """Optimize variable-length contiguous segments for every channel."""
+
+    values = np.asarray(channels, dtype=np.float64)
+    expected_shape = (config.system.num_uavs, config.system.num_uavs)
+    if values.ndim != 3 or values.shape[1:] != expected_shape:
+        raise ValueError(f"channels must have shape (N, {expected_shape[0]}, {expected_shape[1]})")
+    return np.stack(
+        [
+            _dynamic_programming_deployment(channel, config, latency_reference)
+            for channel in values
+        ]
+    )
+
 __all__ = [
     "fixed_eight_candidates",
     "fixed_eight_proxy_baseline",
     "random_feasible_baseline",
     "surrogate_random_search",
     "proxy_beam_baseline",
+    "dynamic_programming_proxy_cost",
+    "dynamic_programming_baseline",
 ]

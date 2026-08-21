@@ -21,6 +21,7 @@ import torch
 from uav_rl.config import DataGenerationConfig
 from uav_rl.resource_assignment import ResourceConstrainedConfig
 from uav_rl.resource_baselines import (
+    dynamic_programming_baseline,
     fixed_eight_proxy_baseline,
     proxy_beam_baseline,
     random_feasible_baseline,
@@ -148,6 +149,9 @@ def main() -> None:
     methods: dict[str, np.ndarray] = {
         "ppo_deterministic": deterministic,
         "ppo_top1_surrogate": topk_deployments[:, 0],
+        "dynamic_programming": dynamic_programming_baseline(
+            channels, resource_config, latency_reference
+        ),
         "fixed_eight_strong_link": fixed_eight_proxy_baseline(
             channels, resource_config, latency_reference, score="strong_link"
         ),

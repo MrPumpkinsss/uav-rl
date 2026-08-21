@@ -1,0 +1,155 @@
+{
+    "format_version":  1,
+    "stage":  "common_seed_true_model_baseline_comparison",
+    "not_used_for_surrogate_training":  true,
+    "run_dir":  "artifacts\\runs\\surrogate_ppo\\layerwise_topk_high_augmented_2026-08-20",
+    "checkpoint":  "artifacts\\runs\\surrogate_ppo\\layerwise_topk_high_augmented_2026-08-20\\best_policy.pth",
+    "checkpoint_sha256":  "f2ab36cde8eacf85bab27b758e14982e71321c934e6fccaf9f9c5cb94b949088",
+    "surrogate":  "artifacts\\models\\ppl_surrogate_general_assignment_high_augmented_ensemble.pth",
+    "surrogate_sha256":  "74a472278231db33560f6a57801a0af25a91d5d6bfa18a67bfe8fc203b0d84df",
+    "channels":  32,
+    "channel_seed":  20260824,
+    "noise_seeds":  [
+                        4100000,
+                        4100001,
+                        4100002,
+                        4100003
+                    ],
+    "top_k":  5,
+    "candidate_samples":  20,
+    "proxy_beam_width":  128,
+    "surrogate_search_candidates":  1024,
+    "clean_perplexity":  12.87591098442322,
+    "evaluated_sequences":  27,
+    "evaluated_tokens":  1689,
+    "methods":  {
+                    "ppo_deterministic":  {
+                                              "reward_mean":  -0.4282208979129791,
+                                              "reward_std":  0.08385386317968369,
+                                              "ppl_mean":  17.728132247924805,
+                                              "ppl_std":  3.369039297103882,
+                                              "log_ppl_ratio_mean":  0.3063943386077881,
+                                              "latency_mean_seconds":  0.7217678427696228,
+                                              "latency_std_seconds":  0.023083077743649483,
+                                              "invalid_fraction":  0.0,
+                                              "reward_improvement_vs_ppo_top1_percent":  -6.856585057935677
+                                          },
+                    "ppo_top1_surrogate":  {
+                                               "reward_mean":  -0.4007435739040375,
+                                               "reward_std":  0.051621947437524796,
+                                               "ppl_mean":  16.735280990600586,
+                                               "ppl_std":  1.6375049352645874,
+                                               "log_ppl_ratio_mean":  0.25775235891342163,
+                                               "latency_mean_seconds":  0.7134843468666077,
+                                               "latency_std_seconds":  0.021056566387414932,
+                                               "invalid_fraction":  0.0
+                                           },
+                    "dynamic_programming":  {
+                                                "reward_mean":  -0.4808666706085205,
+                                                "reward_std":  0.045256923884153366,
+                                                "ppl_mean":  15.619383811950684,
+                                                "ppl_std":  1.3678871393203735,
+                                                "log_ppl_ratio_mean":  0.18931320309638977,
+                                                "latency_mean_seconds":  1.0135633945465088,
+                                                "latency_std_seconds":  0.018790701404213905,
+                                                "invalid_fraction":  0.0,
+                                                "reward_improvement_vs_ppo_top1_percent":  -19.99360736441139
+                                            },
+                    "fixed_eight_strong_link":  {
+                                                    "reward_mean":  -0.47580352425575256,
+                                                    "reward_std":  0.05006583780050278,
+                                                    "ppl_mean":  15.309688568115234,
+                                                    "ppl_std":  1.463665246963501,
+                                                    "log_ppl_ratio_mean":  0.16875740885734558,
+                                                    "latency_mean_seconds":  1.0272488594055176,
+                                                    "latency_std_seconds":  0.021817628294229507,
+                                                    "invalid_fraction":  0.0,
+                                                    "reward_improvement_vs_ppo_top1_percent":  -18.73016942492234
+                                                },
+                    "fixed_eight_compute_greedy":  {
+                                                       "reward_mean":  -0.641694188117981,
+                                                       "reward_std":  0.18220341205596924,
+                                                       "ppl_mean":  21.970348358154297,
+                                                       "ppl_std":  9.290984153747559,
+                                                       "log_ppl_ratio_mean":  0.4703041911125183,
+                                                       "latency_mean_seconds":  1.0669224262237549,
+                                                       "latency_std_seconds":  0.05070475488901138,
+                                                       "invalid_fraction":  0.0,
+                                                       "reward_improvement_vs_ppo_top1_percent":  -60.12588345874307
+                                                   },
+                    "proxy_beam_128":  {
+                                           "reward_mean":  -0.41945815086364746,
+                                           "reward_std":  0.053595345467329025,
+                                           "ppl_mean":  17.56741714477539,
+                                           "ppl_std":  1.8947099447250366,
+                                           "log_ppl_ratio_mean":  0.3050621747970581,
+                                           "latency_mean_seconds":  0.7005190253257751,
+                                           "latency_std_seconds":  0.01477869413793087,
+                                           "invalid_fraction":  0.0,
+                                           "reward_improvement_vs_ppo_top1_percent":  -4.669963083198784
+                                       },
+                    "random_feasible":  {
+                                            "reward_mean":  -3.383793354034424,
+                                            "reward_std":  2.0132856369018555,
+                                            "ppl_mean":  860.958740234375,
+                                            "ppl_std":  1800.9173583984375,
+                                            "log_ppl_ratio_mean":  2.736844778060913,
+                                            "latency_mean_seconds":  5.289106845855713,
+                                            "latency_std_seconds":  3.301870346069336,
+                                            "invalid_fraction":  0.0,
+                                            "reward_improvement_vs_ppo_top1_percent":  -744.3786936043823
+                                        },
+                    "surrogate_search_1024":  {
+                                                  "reward_mean":  -0.4889655113220215,
+                                                  "reward_std":  0.07259252667427063,
+                                                  "ppl_mean":  16.232372283935547,
+                                                  "ppl_std":  2.350245237350464,
+                                                  "log_ppl_ratio_mean":  0.22283895313739777,
+                                                  "latency_mean_seconds":  0.9908256530761719,
+                                                  "latency_std_seconds":  0.02909507229924202,
+                                                  "invalid_fraction":  0.0,
+                                                  "reward_improvement_vs_ppo_top1_percent":  -22.01456072234105
+                                              },
+                    "fixed_eight_surrogate_proxy":  {
+                                                        "reward_mean":  -0.475506991147995,
+                                                        "reward_std":  0.04449126496911049,
+                                                        "ppl_mean":  15.431166648864746,
+                                                        "ppl_std":  1.3503938913345337,
+                                                        "log_ppl_ratio_mean":  0.17724984884262085,
+                                                        "latency_mean_seconds":  1.015326976776123,
+                                                        "latency_std_seconds":  0.018270503729581833,
+                                                        "invalid_fraction":  0.0,
+                                                        "reward_improvement_vs_ppo_top1_percent":  -18.656173701205862
+                                                    },
+                    "ppo_topk_true_oracle":  {
+                                                 "reward_mean":  -0.3918205499649048,
+                                                 "reward_std":  0.0429665744304657,
+                                                 "ppl_mean":  16.407289505004883,
+                                                 "ppl_std":  1.2878689765930176,
+                                                 "log_ppl_ratio_mean":  0.2394908219575882,
+                                                 "latency_mean_seconds":  0.7140294909477234,
+                                                 "latency_std_seconds":  0.02116081491112709,
+                                                 "invalid_fraction":  0.0,
+                                                 "candidate_reward_mean":  -0.3918205499649048,
+                                                 "candidate_selection_gap_vs_top1":  0.00892302393913269,
+                                                 "reward_improvement_vs_ppo_top1_percent":  2.226616849324553
+                                             }
+                },
+    "topk_surrogate_reward_mean_by_rank":  [
+                                               -0.3720252215862274,
+                                               -0.37732499837875366,
+                                               -0.3874950110912323,
+                                               -0.39237502217292786,
+                                               -0.39671483635902405
+                                           ],
+    "evaluator":  {
+                      "model_id":  "codellama/CodeLlama-7b-hf",
+                      "clean_perplexity":  12.87591098442322,
+                      "evaluated_sequences":  27,
+                      "evaluated_tokens":  1689,
+                      "model_forwards":  697,
+                      "cache_hits":  1223,
+                      "cached_entries":  1396
+                  },
+    "elapsed_seconds":  1041.964514899999
+}
