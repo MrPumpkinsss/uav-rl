@@ -491,25 +491,25 @@ artifacts/runs/surrogate_ppo/common_seed_baseline_comparison.md
 
 ### 结果表
 
-reward 是负的综合代价，因此越接近 0 越好；PPL 和 latency 越小越好。下表的 PPO 行已经更新为 200000 episode 续训结果，其他 baseline 保持原 common-seed benchmark 的结果。默认部署推荐 deterministic 行；Top-K 行用于候选增强和对照。最后一列统一相对 200000 episode 的 Top-K Top-1 reward 计算。`ppo_topk_true_oracle` 仍然是不可部署的候选上界，不能和实际 policy 等价比较。
+reward 是负的综合代价，因此越接近 0 越好；PPL 和 latency 越小越好。下表的 PPO 行已经更新为 200000 episode 续训结果，其他 baseline 保持原 common-seed benchmark 的结果。默认部署推荐 deterministic 行；Top-K 行用于候选增强和对照。最后一列统一相对当前默认部署的 200000 episode deterministic reward（`-0.384838`）计算。`ppo_topk_true_oracle` 仍然是不可部署的候选上界，不能和实际 policy 等价比较。
 
-| 方法 | 算法类别 | 真实 reward ↑ | PPL ↓ | latency (s) ↓ | 相对 200000 episode Top-K Top-1 |
+| 方法 | 算法类别 | 真实 reward ↑ | PPL ↓ | latency (s) ↓ | 相对 200000 episode deterministic |
 | --- | --- | ---: | ---: | ---: | ---: |
-| **PPO deterministic (200000 ep.)** | **当前默认部署：逐层 argmax rollout** | **-0.384838** | — | — | **+1.25%** |
-| **High-augmented PPO Top-1 (200000 ep.)** | **surrogate 排序的 20-candidate Top-K** | **-0.389706** | — | — | — |
-| PPO Top-5 true oracle (200000 ep.) | 候选集真实模型上界（不可部署） | **-0.381480** | — | — | +2.11% |
-| **CoEdge-style adaptive partition** | **自适应逐层边际代价分配** | **-0.390294** | 16.228 | 0.722 | -0.15% |
-| **Surrogate simulated annealing** | beam 512 初始化 + surrogate 模拟退火 | -0.406119 | 16.986 | 0.708 | -4.21% |
-| **Surrogate local search** | beam 512 初始化 + surrogate 局部改进 | -0.411060 | 17.245 | 0.704 | -5.48% |
-| Constrained genetic surrogate | 约束遗传算法 + frozen surrogate | -0.417787 | 17.480 | 0.704 | -7.21% |
-| Proxy beam 128 | 任意逐层 assignment 的 additive proxy beam | -0.419458 | 17.567 | **0.701** | -7.63% |
-| Neurosurgeon-style best split | 两 UAV 单切分点枚举 | -0.419458 | 17.567 | 0.701 | -7.63% |
-| MILP proxy oracle | 线性化 proxy 的 SciPy/HiGHS 求解器参考 | -0.421463 | 17.658 | 0.700 | -8.15% |
-| Wide proxy beam 512 | 更宽的 additive proxy beam | -0.421463 | 17.658 | 0.700 | -8.15% |
-| Fixed-eight Strong-link | 固定 4 段 × 8 层的链路优先启发式 | -0.475804 | **15.310** | 1.027 | -22.09% |
-| **Dynamic programming** | **可变长度连续区块的 DP proxy** | **-0.480867** | 15.619 | 1.014 | -23.39% |
-| Surrogate random search 1024 | 1024 个随机可行 assignment 的 surrogate 搜索 | -0.488966 | 16.232 | 0.991 | -25.47% |
-| Random feasible | 只检查资源可行性的随机 assignment | -3.383793 | 860.959 | 5.289 | -768.29% |
+| **PPO deterministic (200000 ep.)** | **当前默认部署：逐层 argmax rollout** | **-0.384838** | — | — | **—** |
+| **High-augmented PPO Top-1 (200000 ep.)** | **surrogate 排序的 20-candidate Top-K** | **-0.389706** | — | — | -1.26% |
+| PPO Top-5 true oracle (200000 ep.) | 候选集真实模型上界（不可部署） | **-0.381480** | — | — | +0.87% |
+| **CoEdge-style adaptive partition** | **自适应逐层边际代价分配** | **-0.390294** | 16.228 | 0.722 | -1.42% |
+| **Surrogate simulated annealing** | beam 512 初始化 + surrogate 模拟退火 | -0.406119 | 16.986 | 0.708 | -5.53% |
+| **Surrogate local search** | beam 512 初始化 + surrogate 局部改进 | -0.411060 | 17.245 | 0.704 | -6.81% |
+| Constrained genetic surrogate | 约束遗传算法 + frozen surrogate | -0.417787 | 17.480 | 0.704 | -8.56% |
+| Proxy beam 128 | 任意逐层 assignment 的 additive proxy beam | -0.419458 | 17.567 | **0.701** | -9.00% |
+| Neurosurgeon-style best split | 两 UAV 单切分点枚举 | -0.419458 | 17.567 | 0.701 | -9.00% |
+| MILP proxy oracle | 线性化 proxy 的 SciPy/HiGHS 求解器参考 | -0.421463 | 17.658 | 0.700 | -9.52% |
+| Wide proxy beam 512 | 更宽的 additive proxy beam | -0.421463 | 17.658 | 0.700 | -9.52% |
+| Fixed-eight Strong-link | 固定 4 段 × 8 层的链路优先启发式 | -0.475804 | **15.310** | 1.027 | -23.64% |
+| **Dynamic programming** | **可变长度连续区块的 DP proxy** | **-0.480867** | 15.619 | 1.014 | -24.95% |
+| Surrogate random search 1024 | 1024 个随机可行 assignment 的 surrogate 搜索 | -0.488966 | 16.232 | 0.991 | -27.06% |
+| Random feasible | 只检查资源可行性的随机 assignment | -3.383793 | 860.959 | 5.289 | -779.28% |
 
 200000 episode 的 `topk_true_validation.json` 保存了 reward、Top-K selection gap、invalid fraction 和真实模型 provenance，但没有保存可与旧 benchmark 表格逐项对应的 PPL/latency 汇总，因此当前 PPO 三行的 PPL/latency 显式写为 `—`，没有把 10000 episode 快照的旧 PPL/latency 冒充成 200000 episode 结果。其他 baseline 的 PPL/latency 来自原 common-seed 全量 benchmark；这张表是透明合并展示，不应被理解为刚刚重新运行了所有 baseline。
 
