@@ -84,9 +84,10 @@ docs/             项目结构和命名说明
 
 当前 common-seed 真实验证使用 32 个无线 channel、4 个 activation-noise seed 和 CodeLlama-7b。common-seed 的意思是：所有方法使用完全相同的 channel 和 noise seed，因此 reward 可以直接比较：
 
-- 当前 Top-K PPO Top-1 reward：`-0.392712`（3000 episode 延长训练）
-- 当前 Top-K true oracle reward：`-0.384987`（3000 episode 延长训练）
-- deterministic PPO reward：`-0.408486`（3000 episode 延长训练）
+- 当前 200000 episode PPO Top-1 reward：`-0.389706`
+- 当前实验中观测到的最佳 Top-K Top-1 reward：`-0.387903`（10000 episode 快照）
+- 当前 200000 episode Top-5 true oracle reward：`-0.381480`
+- 当前 200000 episode deterministic PPO reward：`-0.384838`
 - 当前 common-seed 中最强可部署 baseline：CoEdge-style adaptive partition，reward `-0.390294`
 - 当前最强非 PPO surrogate 搜索 baseline：surrogate simulated annealing，reward `-0.406119`
 - 新增 dynamic programming baseline reward：`-0.480867`（可变长度连续区块，不是固定 4×8）
@@ -116,15 +117,15 @@ artifacts/archive/2026-08-20/diverse_topk/
 - autoregressive layerwise actor-critic，逐层选择 UAV；
 - 训练 reward 使用 frozen surrogate，不在每个 PPO action 上调用真实 CodeLlama；
 - 先用 256 个 teacher channels 和 24 个 teacher candidates 做 behavior-cloning warm start；
-- 已完成 3000 episode PPO 微调；其中 1000 到 3000 episode 是从原 `training_state.pth` 无损续训；
+- 已完成 200000 episode PPO 微调；其中 1000 到 200000 episode 均从同一个 `training_state.pth` 无损续训；
 - “Top-K”表示先生成多个候选；当前每个 channel 生成 20 个候选，用 surrogate 排序，实际部署选择其中排名第 1 的候选（Top-1）；真实验证另外保留前 5 个候选，计算不可部署的 Top-5 true oracle 上界；
 - 最终用真实 CodeLlama 在 held-out channel/noise seed 上验证。
 
-当前最好是指：在本项目现有的统一 common-seed 真实评估协议下，它是**可执行、可部署方法中 reward 最好的 PPO policy**。Top-5 true oracle 的结果更高，但它需要用真实 CodeLlama 在候选中事后挑选，不能作为实际部署策略。
+这里的“当前主线模型”指最新完成的 200000 episode policy artifact。需要区分两个指标：在 Top-K surrogate-selected Top-1 上，当前实验观察到的最好值仍是 10000 episode 快照（`-0.387903`）；在 deterministic deployment 上，200000 episode 是目前更好的 PPO 结果（`-0.384838`）。Top-5 true oracle 需要用真实 CodeLlama 在候选中事后挑选，不能作为实际部署策略。
 
-### 3000 episode 延长训练结果
+### 3000 episode 延长训练结果（历史对照）
 
-本次延长训练复用了原 high-augmented run 的 `training_state.pth`，只增加 `training_episodes`，没有重新初始化 policy、optimizer 或随机数状态。每 500 episode 保存一个新候选 checkpoint：`episode_001500.pth`、`episode_002000.pth`、`episode_002500.pth` 和 `episode_003000.pth`。
+这组历史结果复用了原 high-augmented run 的 `training_state.pth`，只增加 `training_episodes`，没有重新初始化 policy、optimizer 或随机数状态。
 
 在相同的 32 channel、4 noise seed、真实 CodeLlama 验证协议下，3000 episode 的结果为：
 
@@ -135,10 +136,41 @@ artifacts/archive/2026-08-20/diverse_topk/
 | PPO Top-5 true oracle | -0.391821 | **-0.384987** |
 | invalid fraction | 0 | 0 |
 
-PPO Top-1 相比 1000 episode 快照提升约 2.00%，但仍略低于当前 CoEdge-style adaptive partition 的 -0.390294。这次只延长了 PPO，没有重新运行整套 baseline，因此下面的 common-seed 表仍明确标记为 1000 episode 对照快照。
+PPO Top-1 相比 1000 episode 快照提升约 2.00%，但仍略低于当前 CoEdge-style adaptive partition 的 -0.390294。这次结果是历史延长训练对照；后续 200000 episode 结果见下节。
 
 验证结果保存在 `artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/topk_true_validation.json`，最终 policy 保存在 `artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth`。
 
+### 200000 episode 延长训练结果
+
+本轮从 10000 episode 的 `training_state.pth` 无损续训到 200000 episode，每 20000 episode 保存一个 checkpoint。训练继续复用原有 policy、optimizer、surrogate、channel RNG 和 noise RNG，没有重新初始化；因此这是同一实验轨迹的延长，而不是新的独立随机实验。
+
+新增 checkpoint 为：
+
+```text
+candidate_policies/episode_020000.pth
+candidate_policies/episode_040000.pth
+candidate_policies/episode_060000.pth
+candidate_policies/episode_080000.pth
+candidate_policies/episode_100000.pth
+candidate_policies/episode_120000.pth
+candidate_policies/episode_140000.pth
+candidate_policies/episode_160000.pth
+candidate_policies/episode_180000.pth
+candidate_policies/episode_200000.pth
+```
+
+在相同的 32 channel、4 noise seed、真实 CodeLlama 验证协议下：
+
+| 指标 | 10000 episode | 200000 episode |
+| --- | ---: | ---: |
+| PPO Top-1 true reward | **-0.387903** | -0.389706 |
+| PPO deterministic true reward | -0.399736 | **-0.384838** |
+| PPO Top-5 true oracle | **-0.378790** | -0.381480 |
+| invalid fraction | 0 | 0 |
+
+200000 episode 让 deterministic policy 相比 10000 episode 提升约 3.73%，但 Top-K surrogate-selected Top-1 下降约 0.46%，Top-5 true oracle 下降约 0.71%。这说明继续增加 PPO episode 已经不是当前主要瓶颈：policy 的确定性输出在变好，但 surrogate 对多候选的排序仍会引入选择误差。200000 episode 的 Top-1 reward `-0.389706` 仍略优于 CoEdge-style adaptive partition 的 `-0.390294`，差距约 0.15%，因此需要在更大的 held-out 集合上复验稳定性，不能只凭这一组 32 channel 宣称显著领先。
+
+最终真实验证结果保存在 `artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/topk_true_validation.json`；最新 policy 保存在同目录的 `best_policy.pth`。训练状态 `training_state.pth` 仍保留，可继续 resume，但下一步更值得优先改进 Top-K candidate ranking 或评估 deterministic deployment，而不是盲目增加 episode。
 其他已上传模型是对照或历史模型，不是并列的当前入口。这里的 `high-augmented` 表示训练数据中额外加入了高 boundary / 高丢包区域样本，目的是改善困难区域的排序能力：
 
 - `ppl_surrogate_general_assignment_ensemble.pth`：通用 surrogate 对照版本；
@@ -383,8 +415,8 @@ artifacts/runs/surrogate_ppo/layerwise_topk/
 
 ```powershell
 python scripts/ppo/train_layerwise_topk.py `
-  --episodes 3000 `
-  --checkpoint-interval-episodes 500 `
+  --episodes 200000 `
+  --checkpoint-interval-episodes 20000 `
   --resume
 ```
 
