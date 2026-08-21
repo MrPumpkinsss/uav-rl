@@ -475,6 +475,413 @@ def dynamic_programming_baseline(
         ]
     )
 
+
+def _safe_sample_assignment(
+    rng: np.random.Generator,
+    channel: np.ndarray,
+    config: ResourceConstrainedConfig,
+    latency_reference: float,
+) -> np.ndarray:
+    """Sample a feasible arbitrary assignment with a deterministic fallback."""
+
+    target = int(rng.integers(3, min(14, config.system.num_layers - 1) + 1))
+    try:
+        return sample_general_assignment(
+            rng, channel, config, target_boundaries=target, max_attempts=500
+        )
+    except RuntimeError:
+        return proxy_beam_baseline(
+            channel[None, ...], config, latency_reference, beam_width=128
+        )[0]
+
+
+def _mutate_assignment(
+    assignment: np.ndarray,
+    rng: np.random.Generator,
+    config: ResourceConstrainedConfig,
+    channel: np.ndarray,
+) -> np.ndarray:
+    """Apply a one-layer or contiguous-run mutation and retain feasibility."""
+
+    candidate = np.asarray(assignment, dtype=np.int64).copy()
+    if rng.random() < 0.5:
+        index = int(rng.integers(0, config.system.num_layers))
+        candidate[index] = int(rng.integers(0, config.system.num_uavs))
+    else:
+        start = int(rng.integers(0, config.system.num_layers))
+        end = int(rng.integers(start + 1, config.system.num_layers + 1))
+        candidate[start:end] = int(rng.integers(0, config.system.num_uavs))
+    try:
+        validate_layerwise_deployment(candidate, config, channel=channel)
+    except ValueError:
+        return np.asarray(assignment, dtype=np.int64).copy()
+    return candidate
+
+
+def constrained_genetic_surrogate_baseline(
+    channels: np.ndarray,
+    config: ResourceConstrainedConfig,
+    environment: ResourceDeploymentEnvironment,
+    *,
+    population_size: int = 64,
+    generations: int = 64,
+    mutation_rate: float = 0.08,
+    seed: int = 20260828,
+) -> np.ndarray:
+    """Constrained GA over arbitrary assignments using frozen surrogate reward."""
+
+    if population_size < 4 or generations < 1:
+        raise ValueError("population_size must be >= 4 and generations must be positive")
+    if not 0.0 <= mutation_rate <= 1.0:
+        raise ValueError("mutation_rate must be in [0, 1]")
+    rng = np.random.default_rng(seed)
+    starts = proxy_beam_baseline(
+        np.asarray(channels), config, environment.latency_reference, beam_width=512
+    )
+    selected: list[np.ndarray] = []
+    for channel, start in zip(np.asarray(channels), starts, strict=True):
+        population = [np.asarray(start, dtype=np.int64).copy()]
+        seen = {tuple(int(value) for value in population[0])}
+        attempts = 0
+        while len(population) < population_size and attempts < population_size * 20:
+            attempts += 1
+            candidate = _safe_sample_assignment(
+                rng, channel, config, environment.latency_reference
+            )
+            key = tuple(int(value) for value in candidate)
+            if key not in seen:
+                seen.add(key)
+                population.append(candidate)
+        while len(population) < population_size:
+            population.append(population[int(rng.integers(0, len(population)))].copy())
+        population_array = np.stack(population)
+        repeated = np.repeat(channel[None, ...], len(population_array), axis=0)
+        rewards, _ = environment.evaluate(repeated, population_array)
+        best_index = int(np.argmax(rewards))
+        best = population_array[best_index].copy()
+        best_reward = float(rewards[best_index])
+        elite_count = max(2, population_size // 5)
+        for _ in range(generations):
+            order = np.argsort(rewards)[::-1]
+            elites = population_array[order[:elite_count]]
+            next_population = [elite.copy() for elite in elites]
+            while len(next_population) < population_size:
+                first = elites[int(rng.integers(0, len(elites)))]
+                second = elites[int(rng.integers(0, len(elites)))]
+                cut = int(rng.integers(1, config.system.num_layers))
+                child = np.concatenate((first[:cut], second[cut:])).astype(np.int64)
+                if rng.random() < mutation_rate:
+                    child = _mutate_assignment(child, rng, config, channel)
+                try:
+                    validate_layerwise_deployment(child, config, channel=channel)
+                except ValueError:
+                    child = _safe_sample_assignment(
+                        rng, channel, config, environment.latency_reference
+                    )
+                next_population.append(child)
+            population_array = np.stack(next_population)
+            repeated = np.repeat(channel[None, ...], len(population_array), axis=0)
+            rewards, _ = environment.evaluate(repeated, population_array)
+            best_index = int(np.argmax(rewards))
+            if float(rewards[best_index]) > best_reward:
+                best = population_array[best_index].copy()
+                best_reward = float(rewards[best_index])
+        selected.append(best)
+    return np.stack(selected)
+
+
+def surrogate_simulated_annealing_baseline(
+    channels: np.ndarray,
+    config: ResourceConstrainedConfig,
+    environment: ResourceDeploymentEnvironment,
+    *,
+    steps: int = 4096,
+    initial_temperature: float = 0.02,
+    final_temperature: float = 0.0005,
+    seed: int = 20260829,
+) -> np.ndarray:
+    """Improve beam-512 assignments with surrogate simulated annealing."""
+
+    if steps < 1 or initial_temperature <= 0.0 or final_temperature <= 0.0:
+        raise ValueError("steps and temperatures must be positive")
+    if final_temperature > initial_temperature:
+        raise ValueError("final_temperature cannot exceed initial_temperature")
+    rng = np.random.default_rng(seed)
+    starts = proxy_beam_baseline(
+        np.asarray(channels), config, environment.latency_reference, beam_width=512
+    )
+    selected: list[np.ndarray] = []
+    for channel, start in zip(np.asarray(channels), starts, strict=True):
+        current = np.asarray(start, dtype=np.int64).copy()
+        current_reward = float(
+            environment.evaluate(channel[None, ...], current[None, :])[0][0]
+        )
+        best = current.copy()
+        best_reward = current_reward
+        for step in range(steps):
+            candidate = _mutate_assignment(current, rng, config, channel)
+            candidate_reward = float(
+                environment.evaluate(channel[None, ...], candidate[None, :])[0][0]
+            )
+            fraction = step / max(1, steps - 1)
+            temperature = initial_temperature * (1.0 - fraction) + final_temperature * fraction
+            delta = candidate_reward - current_reward
+            if delta >= 0.0 or rng.random() < np.exp(delta / temperature):
+                current = candidate
+                current_reward = candidate_reward
+            if current_reward > best_reward:
+                best = current.copy()
+                best_reward = current_reward
+        selected.append(best)
+    return np.stack(selected)
+
+
+def coedge_adaptive_partition_baseline(
+    channels: np.ndarray,
+    config: ResourceConstrainedConfig,
+    latency_reference: float,
+) -> np.ndarray:
+    """Choose dynamic contiguous segments using local compute/link marginal cost."""
+
+    system = config.system
+    memory_profile = np.asarray(config.layer_memory_units, dtype=np.float64)
+    compute_seconds = np.asarray(config.layer_compute_seconds_at_unit_speed, dtype=np.float64)
+    speeds = np.asarray(system.compute_speed, dtype=np.float64)
+    capacities = np.asarray(config.uav_memory_capacity_units, dtype=np.float64)
+    energy_budget = np.asarray(config.uav_energy_budget_joule, dtype=np.float64)
+    hover = np.asarray(config.uav_hover_energy_joule, dtype=np.float64)
+    selected: list[np.ndarray] = []
+    for channel in np.asarray(channels):
+        deployment: list[int] = []
+        memory = np.zeros(system.num_uavs, dtype=np.float64)
+        compute_energy = np.zeros(system.num_uavs, dtype=np.float64)
+        previous: int | None = None
+        for layer in range(system.num_layers):
+            candidates: list[tuple[float, int]] = []
+            for uav in range(system.num_uavs):
+                next_memory = memory[uav] + memory_profile[layer]
+                next_energy = compute_energy[uav] + (
+                    config.compute_energy_coefficient * speeds[uav] ** 2 * compute_seconds[layer]
+                )
+                if next_memory > capacities[uav] + 1e-9:
+                    continue
+                if next_energy + hover[uav] > energy_budget[uav] + 1e-9:
+                    continue
+                cost = (1.0 - system.quality_weight) * compute_seconds[layer] / speeds[uav]
+                cost /= latency_reference
+                if previous is not None and previous != uav:
+                    gain = float(channel[previous, uav])
+                    spectral = np.log2(
+                        1.0 + system.transmit_power * gain / system.noise_power
+                    )
+                    cost += system.quality_weight * packet_drop_probability(gain, system)
+                    cost += (1.0 - system.quality_weight) * (
+                        config.activation_mbit_by_boundary[layer - 1]
+                        / (system.total_bandwidth_mhz * spectral * latency_reference)
+                    )
+                load = next_memory / capacities[uav]
+                cost += 0.05 * float(load * load)
+                candidates.append((float(cost), uav))
+            if not candidates:
+                deployment = []
+                break
+            _, chosen = min(candidates)
+            deployment.append(chosen)
+            memory[chosen] += memory_profile[layer]
+            compute_energy[chosen] += (
+                config.compute_energy_coefficient * speeds[chosen] ** 2 * compute_seconds[layer]
+            )
+            previous = chosen
+        candidate = np.asarray(deployment, dtype=np.int64)
+        if candidate.shape != (system.num_layers,):
+            candidate = proxy_beam_baseline(
+                channel[None, ...], config, latency_reference, beam_width=128
+            )[0]
+        try:
+            validate_layerwise_deployment(candidate, config, channel=channel)
+        except ValueError:
+            candidate = dynamic_programming_baseline(
+                channel[None, ...], config, latency_reference
+            )[0]
+        selected.append(candidate)
+    return np.stack(selected)
+
+
+def neurosurgeon_best_split_baseline(
+    channels: np.ndarray,
+    config: ResourceConstrainedConfig,
+    latency_reference: float,
+) -> np.ndarray:
+    """Enumerate the best two-UAV contiguous split, Neurosurgeon-style."""
+
+    system = config.system
+    selected: list[np.ndarray] = []
+    for channel in np.asarray(channels):
+        candidates: list[tuple[float, np.ndarray]] = []
+        for split in range(1, system.num_layers):
+            for left in range(system.num_uavs):
+                for right in range(system.num_uavs):
+                    if left == right:
+                        continue
+                    candidate = np.concatenate(
+                        (
+                            np.full(split, left, dtype=np.int64),
+                            np.full(system.num_layers - split, right, dtype=np.int64),
+                        )
+                    )
+                    try:
+                        validate_layerwise_deployment(candidate, config, channel=channel)
+                    except ValueError:
+                        continue
+                    candidates.append(
+                        (_score_proxy(candidate, channel, config, latency_reference), candidate)
+                    )
+        if candidates:
+            selected.append(min(candidates, key=lambda item: item[0])[1])
+        else:
+            selected.append(
+                proxy_beam_baseline(
+                    channel[None, ...], config, latency_reference, beam_width=128
+                )[0]
+            )
+    return np.stack(selected)
+
+
+def milp_proxy_oracle_baseline(
+    channels: np.ndarray,
+    config: ResourceConstrainedConfig,
+    latency_reference: float,
+    *,
+    time_limit_seconds: float = 5.0,
+) -> np.ndarray:
+    """Solve a linearized drop/compute proxy with SciPy/HiGHS MILP."""
+
+    if time_limit_seconds <= 0.0:
+        raise ValueError("time_limit_seconds must be positive")
+    try:
+        from scipy.optimize import Bounds, LinearConstraint, milp
+        from scipy.sparse import lil_matrix
+    except ImportError:
+        return proxy_beam_baseline(
+            np.asarray(channels), config, latency_reference, beam_width=512
+        )
+    system = config.system
+    layers = system.num_layers
+    uavs = system.num_uavs
+    pairs = [
+        (sender, receiver)
+        for sender in range(uavs)
+        for receiver in range(uavs)
+        if sender != receiver
+    ]
+    selected: list[np.ndarray] = []
+    memory = np.asarray(config.layer_memory_units, dtype=np.float64)
+    compute = np.asarray(config.layer_compute_seconds_at_unit_speed, dtype=np.float64)
+    speeds = np.asarray(system.compute_speed, dtype=np.float64)
+    for channel in np.asarray(channels):
+        x_count = layers * uavs
+        y_count = (layers - 1) * len(pairs)
+        variable_count = x_count + y_count
+
+        def x_index(layer: int, uav: int) -> int:
+            return layer * uavs + uav
+
+        def y_index(boundary: int, pair_index: int) -> int:
+            return x_count + boundary * len(pairs) + pair_index
+
+        objective = np.zeros(variable_count, dtype=np.float64)
+        for layer in range(layers):
+            for uav in range(uavs):
+                objective[x_index(layer, uav)] = (
+                    (1.0 - system.quality_weight) * compute[layer] / speeds[uav] / latency_reference
+                )
+        for boundary in range(layers - 1):
+            for pair_index, (sender, receiver) in enumerate(pairs):
+                gain = float(channel[sender, receiver])
+                spectral = np.log2(
+                    1.0 + system.transmit_power * gain / system.noise_power
+                )
+                edge_cost = system.quality_weight * packet_drop_probability(gain, system)
+                edge_cost += (1.0 - system.quality_weight) * (
+                    config.activation_mbit_by_boundary[boundary]
+                    / (system.total_bandwidth_mhz * spectral * latency_reference)
+                )
+                objective[y_index(boundary, pair_index)] = edge_cost
+
+        rows: list[dict[int, float]] = []
+        lower: list[float] = []
+        upper: list[float] = []
+
+        def add_row(entries: dict[int, float], low: float, high: float) -> None:
+            rows.append(entries)
+            lower.append(low)
+            upper.append(high)
+
+        for layer in range(layers):
+            add_row({x_index(layer, uav): 1.0 for uav in range(uavs)}, 1.0, 1.0)
+        for uav in range(uavs):
+            add_row(
+                {x_index(layer, uav): float(memory[layer]) for layer in range(layers)},
+                -np.inf,
+                float(config.uav_memory_capacity_units[uav]),
+            )
+            add_row(
+                {
+                    x_index(layer, uav): float(
+                        config.compute_energy_coefficient * speeds[uav] ** 2 * compute[layer]
+                    )
+                    for layer in range(layers)
+                },
+                -np.inf,
+                float(config.uav_energy_budget_joule[uav] - config.uav_hover_energy_joule[uav]),
+            )
+        for boundary in range(layers - 1):
+            for pair_index, (sender, receiver) in enumerate(pairs):
+                edge = y_index(boundary, pair_index)
+                add_row({edge: 1.0, x_index(boundary, sender): -1.0}, -np.inf, 0.0)
+                add_row({edge: 1.0, x_index(boundary + 1, receiver): -1.0}, -np.inf, 0.0)
+                add_row(
+                    {
+                        edge: -1.0,
+                        x_index(boundary, sender): 1.0,
+                        x_index(boundary + 1, receiver): 1.0,
+                    },
+                    -np.inf,
+                    1.0,
+                )
+        matrix = lil_matrix((len(rows), variable_count), dtype=np.float64)
+        for row_index, entries in enumerate(rows):
+            for column, value in entries.items():
+                matrix[row_index, column] = value
+        result = milp(
+            objective,
+            integrality=np.ones(variable_count, dtype=np.int8),
+            bounds=Bounds(np.zeros(variable_count), np.ones(variable_count)),
+            constraints=LinearConstraint(
+                matrix.tocsr(), np.asarray(lower), np.asarray(upper)
+            ),
+            options={"time_limit": float(time_limit_seconds), "mip_rel_gap": 0.0},
+        )
+        if not result.success or result.x is None:
+            candidate = proxy_beam_baseline(
+                channel[None, ...], config, latency_reference, beam_width=512
+            )[0]
+        else:
+            candidate = np.asarray(
+                [
+                    int(np.argmax(result.x[layer * uavs : (layer + 1) * uavs]))
+                    for layer in range(layers)
+                ],
+                dtype=np.int64,
+            )
+            try:
+                validate_layerwise_deployment(candidate, config, channel=channel)
+            except ValueError:
+                candidate = proxy_beam_baseline(
+                    channel[None, ...], config, latency_reference, beam_width=512
+                )[0]
+        selected.append(candidate)
+    return np.stack(selected)
 __all__ = [
     "fixed_eight_candidates",
     "fixed_eight_proxy_baseline",
@@ -484,4 +891,9 @@ __all__ = [
     "dynamic_programming_proxy_cost",
     "dynamic_programming_baseline",
     "proxy_beam_surrogate_local_search",
+    "constrained_genetic_surrogate_baseline",
+    "surrogate_simulated_annealing_baseline",
+    "coedge_adaptive_partition_baseline",
+    "neurosurgeon_best_split_baseline",
+    "milp_proxy_oracle_baseline",
 ]

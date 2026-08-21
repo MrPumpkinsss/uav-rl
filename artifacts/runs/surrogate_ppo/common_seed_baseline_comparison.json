@@ -21,6 +21,10 @@
   "wide_proxy_beam_width": 512,
   "local_search_rounds": 3,
   "surrogate_search_candidates": 1024,
+  "ga_population_size": 32,
+  "ga_generations": 16,
+  "annealing_steps": 1024,
+  "milp_time_limit": 1.0,
   "clean_perplexity": 12.87591098442322,
   "evaluated_sequences": 27,
   "evaluated_tokens": 1689,
@@ -123,6 +127,61 @@
       "invalid_fraction": 0.0,
       "reward_improvement_vs_ppo_top1_percent": -2.5743298199866245
     },
+    "constrained_genetic_surrogate": {
+      "reward_mean": -0.4177873134613037,
+      "reward_std": 0.05647240951657295,
+      "ppl_mean": 17.4798526763916,
+      "ppl_std": 2.0222654342651367,
+      "log_ppl_ratio_mean": 0.2992895245552063,
+      "latency_mean_seconds": 0.7037089467048645,
+      "latency_std_seconds": 0.01694614067673683,
+      "invalid_fraction": 0.0,
+      "reward_improvement_vs_ppo_top1_percent": -4.253028786270082
+    },
+    "surrogate_simulated_annealing": {
+      "reward_mean": -0.406119167804718,
+      "reward_std": 0.04768865555524826,
+      "ppl_mean": 16.986242294311523,
+      "ppl_std": 1.6081799268722534,
+      "log_ppl_ratio_mean": 0.2727205157279968,
+      "latency_mean_seconds": 0.7079508900642395,
+      "latency_std_seconds": 0.014256729744374752,
+      "invalid_fraction": 0.0,
+      "reward_improvement_vs_ppo_top1_percent": -1.3414048909909129
+    },
+    "milp_proxy_oracle": {
+      "reward_mean": -0.4214627146720886,
+      "reward_std": 0.05738838389515877,
+      "ppl_mean": 17.65788459777832,
+      "ppl_std": 2.0621910095214844,
+      "log_ppl_ratio_mean": 0.3092436194419861,
+      "latency_mean_seconds": 0.7002929449081421,
+      "latency_std_seconds": 0.014860045164823532,
+      "invalid_fraction": 0.0,
+      "reward_improvement_vs_ppo_top1_percent": -5.17017417552217
+    },
+    "coedge_adaptive_partition": {
+      "reward_mean": -0.3902938663959503,
+      "reward_std": 0.027469607070088387,
+      "ppl_mean": 16.227943420410156,
+      "ppl_std": 0.7548098564147949,
+      "log_ppl_ratio_mean": 0.2302953004837036,
+      "latency_mean_seconds": 0.7220892906188965,
+      "latency_std_seconds": 0.02606337144970894,
+      "invalid_fraction": 0.0,
+      "reward_improvement_vs_ppo_top1_percent": 2.6075795567440485
+    },
+    "neurosurgeon_best_split": {
+      "reward_mean": -0.41945815086364746,
+      "reward_std": 0.053595345467329025,
+      "ppl_mean": 17.56741714477539,
+      "ppl_std": 1.8947099447250366,
+      "log_ppl_ratio_mean": 0.3050621747970581,
+      "latency_mean_seconds": 0.7005190253257751,
+      "latency_std_seconds": 0.01477869413793087,
+      "invalid_fraction": 0.0,
+      "reward_improvement_vs_ppo_top1_percent": -4.669963083198784
+    },
     "ppo_topk_true_oracle": {
       "reward_mean": -0.3918205499649048,
       "reward_std": 0.0429665744304657,
@@ -149,9 +208,9 @@
     "clean_perplexity": 12.87591098442322,
     "evaluated_sequences": 27,
     "evaluated_tokens": 1689,
-    "model_forwards": 116,
-    "cache_hits": 1804,
-    "cached_entries": 1512
+    "model_forwards": 300,
+    "cache_hits": 2260,
+    "cached_entries": 1940
   },
-  "elapsed_seconds": 165.50818949996028
+  "elapsed_seconds": 520.0882530999952
 }

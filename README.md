@@ -87,7 +87,8 @@ docs/             项目结构和命名说明
 - 当前 Top-K PPO Top-1 reward：`-0.400744`
 - 当前 Top-K true oracle reward：`-0.391821`
 - deterministic PPO reward：`-0.428221`
-- 最强非 PPO proxy beam baseline：`-0.419458`
+- 当前 common-seed 中最强可部署 baseline：CoEdge-style adaptive partition，reward `-0.390294`
+- 当前最强非 PPO surrogate 搜索 baseline：surrogate simulated annealing，reward `-0.406119`
 - 新增 dynamic programming baseline reward：`-0.480867`（可变长度连续区块，不是固定 4×8）
 
 结果位于 `artifacts/runs/surrogate_ppo/common_seed_baseline_comparison.*`。
@@ -115,7 +116,7 @@ artifacts/archive/2026-08-20/diverse_topk/
 - autoregressive layerwise actor-critic，逐层选择 UAV；
 - 训练 reward 使用 frozen surrogate，不在每个 PPO action 上调用真实 CodeLlama；
 - 先用 256 个 teacher channels 和 24 个 teacher candidates 做 behavior-cloning warm start；
-- 再进行 1000 episode PPO 微调；
+- 已完成 1000 episode PPO 微调；当前正在基于同一个可恢复 run 继续增加 episode，目标为 3000 episode；
 - “Top-K”表示先生成多个候选；当前每个 channel 生成 20 个候选，用 surrogate 排序，实际部署选择其中排名第 1 的候选（Top-1）；真实验证另外保留前 5 个候选，计算不可部署的 Top-5 true oracle 上界；
 - 最终用真实 CodeLlama 在 held-out channel/noise seed 上验证。
 
@@ -336,7 +337,7 @@ policy 是 autoregressive layerwise actor-critic：从第 0 层到第 31 层依�
 | --- | ---: | --- |
 | `--episodes` | 1000 | 训练 episode 数 |
 | `--rollout-size` | 128 | 每次 PPO update 的 channel 数 |
-| `--checkpoint-interval-episodes` | 200 | candidate checkpoint 间隔 |
+| `--checkpoint-interval-episodes` | 500 | candidate checkpoint 间隔；每 500 episode 保存一个候选 checkpoint |
 | `--validation-interval` | 4 | surrogate validation 触发间隔 |
 | `--top-k` | 5 | 真实验证时保留的候选数 |
 | `--candidate-samples` | 20 | 每个 channel 生成的 rollout 候选数 |
@@ -366,9 +367,13 @@ artifacts/runs/surrogate_ppo/layerwise_topk/
 ```powershell
 python scripts/ppo/train_layerwise_topk.py `
   --episodes 3000 `
-  --checkpoint-interval-episodes 200 `
+  --checkpoint-interval-episodes 500 `
   --resume
 ```
+
+本轮延长训练会复用 `layerwise_topk_high_augmented_2026-08-20/training_state.pth`，只允许增加
+`training_episodes`，不重新初始化 policy、optimizer 或随机数状态。由于已有状态正好完成了 1000
+episode，新增候选 checkpoint 会落在 episode 1500、2000、2500 和 3000；原有的 200 间隔历史文件保留不覆盖。
 
 只有在确认 run directory 对应的 config 和 surrogate checkpoint 没有变化时才应 resume。改变 surrogate、resource config、seed 或 policy architecture 后应创建新的 run directory。
 
@@ -443,6 +448,11 @@ reward 是负的综合代价，因此越接近 0 越好；PPL 和 latency 越小
 | PPO Top-5 true oracle | 候选集真实模型上界（不可部署） | **-0.391821** | 16.407 | 0.714 | +2.23% |
 | Proxy beam 128 | 非 PPO beam search | -0.419458 | 17.567 | **0.701** | -4.67% |
 | **Surrogate local search** | **beam 512 初始化 + surrogate 局部搜索** | **-0.411060** | 17.245 | 0.704 | -2.57% |
+| **CoEdge-style adaptive partition** | **自适应逐层边际代价分配** | **-0.390294** | 16.228 | 0.722 | **+2.61%** |
+| **Surrogate simulated annealing** | beam 512 初始化 + surrogate 模拟退火 | -0.406119 | 16.986 | 0.708 | -1.34% |
+| Constrained genetic surrogate | 约束遗传算法 + frozen surrogate | -0.417787 | 17.480 | 0.704 | -4.25% |
+| MILP proxy oracle | 线性化 proxy 的 SciPy/HiGHS 求解器参考 | -0.421463 | 17.658 | 0.700 | -5.17% |
+| Neurosurgeon-style best split | 两 UAV 单切分点枚举 | -0.419458 | 17.567 | 0.701 | -4.67% |
 | Wide proxy beam 512 | beam search（宽度 512） | -0.421463 | 17.658 | 0.700 | -5.17% |
 | PPO deterministic | 同一 PPO policy 的确定性 rollout | -0.428221 | 17.728 | 0.722 | -6.86% |
 | Fixed-eight Strong-link | 历史固定分段：32 层先切成 4 段，每段 8 层，再按通信链路质量分配 UAV | -0.475804 | **15.310** | 1.027 | -18.73% |
@@ -471,20 +481,25 @@ reward 是负的综合代价，因此越接近 0 越好；PPL 和 latency 越小
 
 - **Dynamic programming（可变长度连续区块）**：这是当前资源模型下新增的 DP baseline。它不固定 4×8 层，而是在任意 layer 之间选择 boundary，每个区块长度可以不同（不超过 8 层），并从 4 或 5 台不同 UAV 中选择区块顺序；先用“边界丢包总量 + 归一化总延迟”的加性 proxy 做动态规划，再用真实 CodeLlama 评估最终 reward。它比 fixed-eight 更灵活，但仍不允许后续切回已经使用过的 UAV，也不直接优化真实非线性 PPL，所以不能与 PPO 的完整逐层策略等同。
 - **Surrogate random search 1024**：每个 channel 随机生成 1024 个资源可行的任意 assignment，用 surrogate reward 选最优者，不做 PPO policy learning。
+- **CoEdge-style adaptive partition**：逐层读取当前 UAV 的计算、memory 和 energy 余量，比较继续放置与切换 UAV 的边际 proxy cost，动态决定连续区块数量和边界；它不固定四段，也不使用真实 CodeLlama 搜索。
+- **Surrogate simulated annealing**：以 beam 512 方案为初始点，用 surrogate reward 评价单层/连续区块迁移；允许以递减概率接受暂时变差的动作，减少局部最优。
+- **Constrained genetic surrogate**：把每层的 UAV 编号作为 chromosome，使用单点交叉、可行性修复和 mutation，在 frozen surrogate reward 上演化；本轮配置为 population 32、16 generations。
+- **MILP proxy oracle**：用 SciPy/HiGHS 求解线性化的逐层计算、边界丢包和传输 latency proxy，并最终重新检查真实资源约束；它是 proxy 参考，不是 CodeLlama 全局 oracle。
+- **Neurosurgeon-style best split**：枚举一个 split point 和两台 UAV，选择 additive proxy 最好的前缀/后缀切分；这是文献结构基线，不代表当前任意多 UAV assignment 的完整搜索。
 - **Random feasible**：只保证 memory/energy 可行，不使用质量或 latency 目标。
 
 这些 baseline 的实现分别在 [`src/uav_rl/resource_baselines.py`](src/uav_rl/resource_baselines.py) 和 [`scripts/ppo/compare_general_assignment_baselines.py`](scripts/ppo/compare_general_assignment_baselines.py)。
 
 ### 实验分析
 
-1. **当前 PPO 仍是本协议下最好的可执行策略。** Top-1 PPO 的 reward 为 `-0.400744`；最强非 PPO baseline 是 surrogate local search（`-0.411060`），低约 `2.57%`。
-2. **Top-K 主要减少随机 rollout 的选择误差。** 同一组 5 个候选的真实 oracle 只比 surrogate-selected Top-1 高 `0.008923`，说明 surrogate 排序保留了大部分候选收益，但仍有少量排序错误。
-3. **确定性 policy 不如 Top-K。** deterministic PPO 比 Top-1 低 `6.86%`，说明只取单条 greedy rollout 会丢掉 policy 分布中的有价值候选。
-4. **只优化链路质量并不等于 reward 最优。** Strong-link 的 PPL 最低，但 latency 约为 PPO 的 1.44 倍；当前 reward 同时考虑质量和 latency，因此总 reward 反而更差。这里 reward 是负的综合代价，所以越接近 0 越好。
-5. **更宽的 beam 不保证真实 reward 更好。** beam 512 的真实 reward 为 `-0.421463`，略低于 beam 128 的 `-0.419458`；说明 proxy 排序存在误差，单纯增加 beam 宽度不能替代更准确的候选评价。
-6. **PPO 学到的是 channel-conditioned assignment policy，而不是独立随机搜索。** surrogate random search 1024 仍低于 PPO，说明 PPO 学到的逐层决策和资源状态建模比独立采样更有效。
-7. **local search 有小幅收益但仍不超过 PPO。** 它从 beam 512 出发，用 frozen surrogate 和解析 latency 尝试单层/连续区块迁移，真实 reward 比 beam 512 提高约 `2.47%`，但仍低于 PPO Top-1。
-8. **结果不能跨协议直接混比。** 之前的 direct true-PPL PPO 报告使用了另一组 64 test channels、16 noise seeds 和不同训练流程，不能把它的 `-0.953925` 与本表的 `-0.400744` 当作同一测试集上的直接排名；它属于“真实 PPL 训练 vs surrogate PPO”的独立对照实验。
+1. **CoEdge-style adaptive partition 在本轮 common-seed 结果中超过 PPO。** 它的真实 reward 为 `-0.390294`，比 PPO Top-1（`-0.400744`）高约 `2.61%`；但它是逐层贪心启发式，不是 PPO policy，因此需要额外测试其跨 seed 稳定性。
+2. **PPO Top-5 true oracle 仍不是全局上界。** 它只在 PPO 自己生成的 5 个候选中用真实模型选择，reward 为 `-0.391821`；CoEdge 超过它说明 CoEdge 找到了 PPO 候选集之外的更好部署。
+3. **模拟退火是当前搜索型 baseline 中最强的 surrogate 方法。** reward 为 `-0.406119`，优于 local search（`-0.411060`）和 GA（`-0.417787`），说明接受少量暂时变差的动作有助于跳出局部最优。
+4. **GA 本轮没有超过 beam/local search。** 约束修复保证了所有 assignment 可行，但在有限 population/generation 预算下，surrogate 搜索仍有较大排序误差。
+5. **MILP proxy oracle 与 beam 512 结果完全相同。** 这不是因为两者等价于真实全局最优，而是当前 MILP 只优化线性化 proxy，且非线性共享带宽 latency 和 CodeLlama PPL 没有进入 solver 目标。
+6. **Neurosurgeon-style 单切分与 beam 128 结果相同。** 在当前资源约束和 proxy 下，最优单切分没有超过允许任意 assignment 的 beam 方法，说明多段/多 UAV 分配仍然是必要的搜索空间。
+7. **local search 和 beam 宽度的结论仍成立。** local search 比 beam 512 提升约 `2.47%`，但低于 PPO；beam 512 仍略低于 beam 128，说明单纯扩大 additive proxy beam 不能解决目标错配。
+8. **结果需要进一步做稳定性确认。** CoEdge 的优势目前来自同一套 32 channels/4 noise seeds 的一次正式 benchmark；在宣布它为新默认 baseline 前，应在更多 held-out channels 和 noise seeds 上复验。
 
 当前结论应写成：**在统一 common-seed、真实 CodeLlama、32 channels/4 noise seeds 的评估中，high-augmented surrogate-trained Top-K PPO 是当前最好的可执行 PPO policy；它仍然落后于不可部署的 Top-5 true oracle，且并不意味着 surrogate 本身在所有 tail 区域都已达到低绝对误差。**
 ## 实验复现与可信度检查

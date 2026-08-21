@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--surrogate', type=Path, default=Path('artifacts/models/ppl_surrogate_general_assignment_ensemble.pth'))
     parser.add_argument('--episodes', type=int, default=1000)
     parser.add_argument('--rollout-size', type=int, default=128)
-    parser.add_argument('--checkpoint-interval-episodes', type=int, default=200)
+    parser.add_argument('--checkpoint-interval-episodes', type=int, default=500)
     parser.add_argument('--validation-interval', type=int, default=4)
     parser.add_argument('--validation-channels', type=int, default=32)
     parser.add_argument('--top-k', type=int, default=5)

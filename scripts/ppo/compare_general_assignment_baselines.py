@@ -22,9 +22,14 @@ from uav_rl.config import DataGenerationConfig
 from uav_rl.resource_assignment import ResourceConstrainedConfig
 from uav_rl.resource_baselines import (
     dynamic_programming_baseline,
+    constrained_genetic_surrogate_baseline,
+    coedge_adaptive_partition_baseline,
     fixed_eight_proxy_baseline,
     proxy_beam_baseline,
     proxy_beam_surrogate_local_search,
+    milp_proxy_oracle_baseline,
+    neurosurgeon_best_split_baseline,
+    surrogate_simulated_annealing_baseline,
     random_feasible_baseline,
     surrogate_random_search,
 )
@@ -110,6 +115,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wide-proxy-beam-width", type=int, default=512)
     parser.add_argument("--local-search-rounds", type=int, default=3)
     parser.add_argument("--surrogate-search-candidates", type=int, default=1024)
+    parser.add_argument("--ga-population-size", type=int, default=64)
+    parser.add_argument("--ga-generations", type=int, default=64)
+    parser.add_argument("--annealing-steps", type=int, default=4096)
+    parser.add_argument("--milp-time-limit", type=float, default=5.0)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--allow-overwrite", action="store_true")
     return parser.parse_args()
@@ -121,6 +130,8 @@ def main() -> None:
         raise ValueError("channels, noise samples, Top-K, and candidate samples must be positive")
     if args.proxy_beam_width < 1 or args.wide_proxy_beam_width < 1 or args.local_search_rounds < 0:
         raise ValueError("beam widths must be positive and local-search rounds cannot be negative")
+    if args.ga_population_size < 4 or args.ga_generations < 1 or args.annealing_steps < 1 or args.milp_time_limit <= 0.0:
+        raise ValueError("new baseline budgets must be positive")
     output = args.output or args.run_dir / "common_seed_baseline_comparison.json"
     cache = args.cache or args.run_dir / "common_seed_baseline_cache.jsonl"
     checkpoint = args.checkpoint or args.run_dir / "best_policy.pth"
@@ -186,6 +197,25 @@ def main() -> None:
             beam_width=args.wide_proxy_beam_width,
             rounds=args.local_search_rounds,
         ),
+        "constrained_genetic_surrogate": constrained_genetic_surrogate_baseline(
+            channels, resource_config, surrogate_environment,
+            population_size=args.ga_population_size,
+            generations=args.ga_generations,
+        ),
+        "surrogate_simulated_annealing": surrogate_simulated_annealing_baseline(
+            channels, resource_config, surrogate_environment,
+            steps=args.annealing_steps,
+        ),
+        "milp_proxy_oracle": milp_proxy_oracle_baseline(
+            channels, resource_config, latency_reference,
+            time_limit_seconds=args.milp_time_limit,
+        ),
+        "coedge_adaptive_partition": coedge_adaptive_partition_baseline(
+            channels, resource_config, latency_reference,
+        ),
+        "neurosurgeon_best_split": neurosurgeon_best_split_baseline(
+            channels, resource_config, latency_reference,
+        ),
     }
 
 
@@ -247,6 +277,10 @@ def main() -> None:
         "wide_proxy_beam_width": args.wide_proxy_beam_width,
         "local_search_rounds": args.local_search_rounds,
         "surrogate_search_candidates": args.surrogate_search_candidates,
+        "ga_population_size": args.ga_population_size,
+        "ga_generations": args.ga_generations,
+        "annealing_steps": args.annealing_steps,
+        "milp_time_limit": args.milp_time_limit,
         "clean_perplexity": evaluator.clean_perplexity,
         "evaluated_sequences": evaluator.evaluated_sequences,
         "evaluated_tokens": evaluator.evaluated_tokens,

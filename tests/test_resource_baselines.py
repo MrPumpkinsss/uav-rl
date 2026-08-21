@@ -11,12 +11,16 @@ from uav_rl.config import SystemConfig
 from uav_rl.resource_assignment import ResourceConstrainedConfig, validate_layerwise_deployment
 from uav_rl.resource_environment import ResourceDeploymentEnvironment
 from uav_rl.resource_baselines import (
+    constrained_genetic_surrogate_baseline,
+    coedge_adaptive_partition_baseline,
     dynamic_programming_baseline,
     dynamic_programming_proxy_cost,
+    milp_proxy_oracle_baseline,
+    neurosurgeon_best_split_baseline,
     proxy_beam_baseline,
     proxy_beam_surrogate_local_search,
+    surrogate_simulated_annealing_baseline,
 )
-
 
 def _feasible_segment_deployments(config: ResourceConstrainedConfig) -> list[np.ndarray]:
     system = config.system
@@ -125,3 +129,30 @@ def test_wide_beam_and_surrogate_local_search_are_feasible_and_non_degrading() -
     validate_layerwise_deployment(improved[0], config, channel=channel)
     assert improved.shape == wide.shape == (1, config.system.num_layers)
     assert float(improved_rewards[0]) >= float(initial_rewards[0]) - 1e-8
+
+def test_paper_style_baselines_are_feasible_and_deterministic() -> None:
+    config = _small_config()
+    channel = np.asarray(
+        [
+            [20.0, 3.0, 15.0],
+            [3.0, 20.0, 8.0],
+            [15.0, 8.0, 20.0],
+        ],
+        dtype=np.float32,
+    )
+    channels = channel[None, ...]
+    environment = ResourceDeploymentEnvironment(config, _DropSumQuality(), latency_reference=0.8)
+    methods = [
+        constrained_genetic_surrogate_baseline(
+            channels, config, environment, population_size=8, generations=2, seed=7
+        ),
+        surrogate_simulated_annealing_baseline(
+            channels, config, environment, steps=16, seed=8
+        ),
+        coedge_adaptive_partition_baseline(channels, config, latency_reference=0.8),
+        neurosurgeon_best_split_baseline(channels, config, latency_reference=0.8),
+        milp_proxy_oracle_baseline(channels, config, latency_reference=0.8, time_limit_seconds=1.0),
+    ]
+    for deployments in methods:
+        assert deployments.shape == (1, config.system.num_layers)
+        validate_layerwise_deployment(deployments[0], config, channel=channel)
