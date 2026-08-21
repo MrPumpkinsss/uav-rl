@@ -105,12 +105,12 @@ artifacts/archive/2026-08-20/diverse_topk/
 
 ## 当前最好模型
 
-当前推荐的可部署模型只有一套：
+当前公开的可部署 PPO checkpoint 只有一个文件，但提供两种推理模式：deterministic 和 Top-K。Surrogate 只用于训练和候选排序，不是部署模型。当前默认推荐 deterministic 模式；Top-K 模式仍保留用于候选增强和对照。
 
 | 组件 | 当前最好版本 | Git 路径 | 说明 |
 | --- | --- | --- | --- |
 | Surrogate | High-augmented 5-model ensemble | `artifacts/models/ppl_surrogate_general_assignment_high_augmented_ensemble.pth` | PPO 训练阶段的质量 reward |
-| PPO policy | High-augmented layerwise Top-K PPO | `artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth` | 当前 common-seed 真实模型评估最好的可部署 policy |
+| PPO policy | High-augmented layerwise PPO（200000 episode） | `artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth` | 同一个 checkpoint 支持 deterministic 和 Top-K；当前默认推荐 deterministic，200000 episode true reward 为 `-0.384838` |
 
 该 policy 的训练方式是：
 
@@ -707,7 +707,7 @@ f(deployment, channel) = full reward
 | 对照 | General surrogate ensemble | [`artifacts/models/ppl_surrogate_general_assignment_ensemble.pth`](artifacts/models/ppl_surrogate_general_assignment_ensemble.pth) | 当前通用 assignment surrogate 默认 checkpoint | 5.41 MiB | `c2fd82f0df6e56e83a80bc492b9f9460ec3fd09210b52d53ea3dd02418f921ff` |
 | **当前最好 surrogate** | **High-augmented surrogate ensemble** | [`artifacts/models/ppl_surrogate_general_assignment_high_augmented_ensemble.pth`](artifacts/models/ppl_surrogate_general_assignment_high_augmented_ensemble.pth) | common-seed baseline 对比使用的 surrogate | 5.41 MiB | `74a472278231db33560f6a57801a0af25a91d5d6bfa18a67bfe8fc203b0d84df` |
 | 对照 | Original Top-K PPO | [`artifacts/runs/surrogate_ppo/layerwise_topk_2026-08-20b/best_policy.pth`](artifacts/runs/surrogate_ppo/layerwise_topk_2026-08-20b/best_policy.pth) | 1000-episode 原始 Top-K PPO policy，使用通用 surrogate | 1.10 MiB | `be93b847e2bfb8cc1a889e8b0a36b034e05cb09568270731426d84554d176f48` |
-| **当前最好 policy** | **High-augmented Top-K PPO** | [`artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth`](artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth) | common-seed baseline 报告实际使用的 policy | 1.10 MiB | `f2ab36cde8eacf85bab27b758e14982e71321c934e6fccaf9f9c5cb94b949088` |
+| **当前主线 policy** | **High-augmented PPO（200000 episode）** | [`artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth`](artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth) | 默认 deterministic 部署；同一 checkpoint 也支持 Top-K 候选模式 | 1.10 MiB | `7c70b8ca1dd01341cd49b931c2c4c075deb46ec91da9dc071f79b5f35acf46c6` |
 | 独立对照 | Direct true-PPL PPO | [`artifacts/models/ppo_true_ppl_multiseed_best.pth`](artifacts/models/ppo_true_ppl_multiseed_best.pth) | 不使用 surrogate、直接用真实 CodeLlama PPL 训练的 1000-episode PPO best policy | 4.84 MiB | `e424300aa7c113d72402cb4660873b43fe668d4a2d8e6d2fa1b9be9edf5b19f4` |
 
 文件大小使用 MiB 展示；SHA256 以 checkpoint 原始字节计算。模型可以 clone 后直接加载：surrogate 使用 `load_surrogate()`，PPO policy 使用对应 run 的 `SystemConfig`、resource config 和 policy 类型。
