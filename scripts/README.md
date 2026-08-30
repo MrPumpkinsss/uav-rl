@@ -6,6 +6,13 @@ Set the source checkout path first:
 $env:PYTHONPATH = "src"
 ```
 
+## System baselines
+
+| Script | Purpose |
+| --- | --- |
+| `baselines/compare_system_baselines.py` | Freeze and compare PPO, JointDNN-MUAV, PipeEdge-UAV, Petals-balanced, Neurosurgeon-inspired, simulated annealing, and random feasible deployments with the common surrogate. |
+| `baselines/evaluate_frozen_system_baselines_true.py` | Evaluate those exact frozen deployments with the matching true LLM and shared noise seeds. |
+
 ## PPO
 
 | Script | Purpose |
@@ -20,6 +27,17 @@ $env:PYTHONPATH = "src"
 | `ppo/diagnose_local_ranking.py` | Diagnose local surrogate ranking around Strong-link actions. |
 
 The Diverse Top-K experiment is archived and is not a current PPO entry point.
+
+## RL algorithm baselines
+
+| Script | Purpose |
+| --- | --- |
+| `rl/compare_algorithms.py` | Train PPO, A2C and masked Double-DQN from scratch under one common surrogate protocol. |
+| `rl/evaluate_algorithms_true.py` | Evaluate frozen RL checkpoints on one common true-LLM channel/noise set. |
+| `rl/plot_algorithm_comparison.py` | Plot per-seed and mean training/validation learning curves. |
+
+The controlled RL table is separate from the teacher-warm-started best-system PPO table. See
+`docs/RL_BASELINE_PROTOCOL.md` for the fairness rules and output layout.
 
 ## Surrogate
 

@@ -16,15 +16,18 @@ src/uav_rl/
 ├── metrics/                   # PPL and evaluation metrics
 ├── models/                    # activation-dropout model hooks
 ├── benchmarks/                # reusable benchmark evaluators
-└── rl/                        # PPO, actor-critic, environment, and oracle code
+└── rl/                        # shared RL state, PPO, policy I/O, and oracle code
+    └── algorithms/            # A2C and masked Double-DQN baselines
 ```
 
 ## Executable entry points
 
 ```text
 scripts/
+├── baselines/                 # system/heuristic screening and frozen true evaluation
 ├── benchmarks/                # one-shot measurement commands
-├── ppo/                       # PPO training, validation, and baseline comparison
+├── ppo/                       # production PPO training and heuristic comparison
+├── rl/                        # controlled PPO/A2C/DQN training and true evaluation
 ├── surrogate/                 # surrogate data collection, diagnostics, and training
 └── maintenance/               # archive/hash and repository maintenance checks
 ```

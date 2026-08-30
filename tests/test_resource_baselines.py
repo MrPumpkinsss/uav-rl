@@ -15,8 +15,11 @@ from uav_rl.resource_baselines import (
     coedge_adaptive_partition_baseline,
     dynamic_programming_baseline,
     dynamic_programming_proxy_cost,
+    jointdnn_multi_uav_baseline,
     milp_proxy_oracle_baseline,
     neurosurgeon_best_split_baseline,
+    petals_balanced_pipeline_baseline,
+    pipeedge_uav_latency_baseline,
     proxy_beam_baseline,
     proxy_beam_surrogate_local_search,
     surrogate_simulated_annealing_baseline,
@@ -151,8 +154,26 @@ def test_paper_style_baselines_are_feasible_and_deterministic() -> None:
         ),
         coedge_adaptive_partition_baseline(channels, config, latency_reference=0.8),
         neurosurgeon_best_split_baseline(channels, config, latency_reference=0.8),
-        milp_proxy_oracle_baseline(channels, config, latency_reference=0.8, time_limit_seconds=1.0),
+        pipeedge_uav_latency_baseline(channels, config, latency_reference=0.8),
+        petals_balanced_pipeline_baseline(channels, config, latency_reference=0.8),
+        jointdnn_multi_uav_baseline(
+            channels, config, latency_reference=0.8, time_limit_seconds=1.0
+        ),
+        milp_proxy_oracle_baseline(
+            channels, config, latency_reference=0.8, time_limit_seconds=1.0
+        ),
     ]
     for deployments in methods:
         assert deployments.shape == (1, config.system.num_layers)
         validate_layerwise_deployment(deployments[0], config, channel=channel)
+
+def test_pipeline_baselines_use_unique_contiguous_uav_blocks() -> None:
+    config = _small_config()
+    rng = np.random.default_rng(91)
+    channels = rng.uniform(2.0, 20.0, size=(2, 3, 3)).astype(np.float32)
+    for method in (pipeedge_uav_latency_baseline, petals_balanced_pipeline_baseline):
+        deployments = method(channels, config, latency_reference=0.8)
+        for channel, deployment in zip(channels, deployments, strict=True):
+            validate_layerwise_deployment(deployment, config, channel=channel)
+            block_uavs = deployment[np.r_[True, deployment[1:] != deployment[:-1]]]
+            assert len(block_uavs) == len(set(block_uavs.tolist()))

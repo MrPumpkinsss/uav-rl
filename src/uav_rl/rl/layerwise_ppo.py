@@ -269,6 +269,7 @@ class LayerwisePPOTrainer:
             "model_state": self.model.state_dict(),
             "ppo_config": asdict(self.config),
             "resource_config": self.resource_config.to_dict(),
+            "max_policy_boundaries": self.max_policy_boundaries,
             "episodes": episodes,
             "training_monitor_reward": monitor_reward,
             "inference": "channel_to_layerwise_assignment_without_teacher",

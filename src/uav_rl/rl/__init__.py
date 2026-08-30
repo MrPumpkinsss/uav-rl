@@ -1,5 +1,6 @@
-"""PPO components for continuous UAV layer deployment."""
+"""Reinforcement-learning policies and trainers for UAV layer deployment."""
 
+from .algorithms import A2CConfig, DQNConfig, LayerwiseA2CTrainer, LayerwiseDQNTrainer
 from .environment import DeploymentEnvironment
 from .policy import ContinuousDeploymentActorCritic
 from .ppo import PPOTrainer
@@ -7,8 +8,12 @@ from .segment_policy import SegmentActorCritic
 from .segment_ppo import SegmentPPOTrainer
 
 __all__ = [
+    "A2CConfig",
     "ContinuousDeploymentActorCritic",
+    "DQNConfig",
     "DeploymentEnvironment",
+    "LayerwiseA2CTrainer",
+    "LayerwiseDQNTrainer",
     "PPOTrainer",
     "SegmentActorCritic",
     "SegmentPPOTrainer",

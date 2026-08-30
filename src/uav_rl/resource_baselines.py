@@ -636,6 +636,162 @@ def surrogate_simulated_annealing_baseline(
     return np.stack(selected)
 
 
+
+def _contiguous_pipeline_deployment(
+    channel: np.ndarray,
+    config: ResourceConstrainedConfig,
+    latency_reference: float,
+    *,
+    objective: str,
+) -> np.ndarray:
+    """Optimize a unique-UAV contiguous pipeline under an analytical objective.
+
+    ``pipeedge_latency`` minimizes additive end-to-end compute and communication
+    latency. ``petals_balance`` first minimizes the slowest pipeline stage and
+    uses total latency as a tie-breaker. Neither selector queries the learned PPL
+    surrogate; final comparison still uses the common reward evaluator.
+    """
+
+    if objective not in {"pipeedge_latency", "petals_balance"}:
+        raise ValueError("unsupported contiguous pipeline objective")
+    if latency_reference <= 0.0:
+        raise ValueError("latency_reference must be positive")
+    system = config.system
+    layers = system.num_layers
+    uavs = system.num_uavs
+    memory = np.asarray(config.layer_memory_units, dtype=np.float64)
+    compute = np.asarray(config.layer_compute_seconds_at_unit_speed, dtype=np.float64)
+    capacities = np.asarray(config.uav_memory_capacity_units, dtype=np.float64)
+    budgets = np.asarray(config.uav_energy_budget_joule, dtype=np.float64)
+    hover = np.asarray(config.uav_hover_energy_joule, dtype=np.float64)
+    speeds = np.asarray(system.compute_speed, dtype=np.float64)
+    activation = np.asarray(config.activation_mbit_by_boundary, dtype=np.float64)
+    memory_prefix = np.concatenate(([0.0], np.cumsum(memory)))
+    compute_prefix = np.concatenate(([0.0], np.cumsum(compute)))
+
+    # State value: primary objective, additive latency, tuple of segment arrays.
+    states: dict[tuple[int, int, int], tuple[float, float, tuple[np.ndarray, ...]]] = {
+        (0, 0, -1): (0.0, 0.0, ())
+    }
+    for start in range(layers):
+        current = [
+            (key, value) for key, value in states.items() if key[0] == start
+        ]
+        for (assigned, used_mask, previous), (primary, total, parts) in current:
+            for uav in range(uavs):
+                if used_mask & (1 << uav):
+                    continue
+                for end in range(start + 1, layers + 1):
+                    segment_memory = memory_prefix[end] - memory_prefix[start]
+                    segment_compute_units = compute_prefix[end] - compute_prefix[start]
+                    compute_energy = (
+                        config.compute_energy_coefficient * speeds[uav] ** 2 * segment_compute_units
+                    )
+                    if segment_memory > capacities[uav] + 1e-9:
+                        break
+                    if compute_energy + hover[uav] > budgets[uav] + 1e-9:
+                        break
+                    compute_latency = segment_compute_units / speeds[uav]
+                    communication_latency = 0.0
+                    if previous >= 0:
+                        gain = float(channel[previous, uav])
+                        spectral = np.log2(
+                            1.0 + system.transmit_power * gain / system.noise_power
+                        )
+                        communication_latency = (
+                            activation[start - 1] / (system.total_bandwidth_mhz * spectral)
+                        )
+                    stage_latency = compute_latency + communication_latency
+                    next_total = total + stage_latency
+                    next_primary = (
+                        next_total
+                        if objective == "pipeedge_latency"
+                        else max(primary, stage_latency)
+                    )
+                    key = (end, used_mask | (1 << uav), uav)
+                    candidate = (
+                        next_primary,
+                        next_total,
+                        parts + (np.full(end - start, uav, dtype=np.int64),),
+                    )
+                    incumbent = states.get(key)
+                    if incumbent is None or candidate[:2] < incumbent[:2]:
+                        states[key] = candidate
+
+    terminals = sorted(
+        (value for (assigned, _, _), value in states.items() if assigned == layers),
+        key=lambda value: value[:2],
+    )
+    for _, _, parts in terminals:
+        candidate = np.concatenate(parts)
+        # Link energy uses the environment's exact shared-bandwidth model and is
+        # therefore checked after the additive pipeline optimization.
+        try:
+            validate_layerwise_deployment(candidate, config, channel=channel)
+        except ValueError:
+            continue
+        return candidate
+    raise RuntimeError("no feasible contiguous pipeline deployment exists")
+
+
+def pipeedge_uav_latency_baseline(
+    channels: np.ndarray,
+    config: ResourceConstrainedConfig,
+    latency_reference: float,
+) -> np.ndarray:
+    """PipeEdge-style contiguous pipeline minimizing analytical latency."""
+
+    values = np.asarray(channels, dtype=np.float64)
+    return np.stack(
+        [
+            _contiguous_pipeline_deployment(
+                channel, config, latency_reference, objective="pipeedge_latency"
+            )
+            for channel in values
+        ]
+    )
+
+
+def petals_balanced_pipeline_baseline(
+    channels: np.ndarray,
+    config: ResourceConstrainedConfig,
+    latency_reference: float,
+) -> np.ndarray:
+    """Petals-style contiguous block chain minimizing the bottleneck stage."""
+
+    values = np.asarray(channels, dtype=np.float64)
+    return np.stack(
+        [
+            _contiguous_pipeline_deployment(
+                channel, config, latency_reference, objective="petals_balance"
+            )
+            for channel in values
+        ]
+    )
+
+
+def jointdnn_multi_uav_baseline(
+    channels: np.ndarray,
+    config: ResourceConstrainedConfig,
+    latency_reference: float,
+    *,
+    time_limit_seconds: float = 5.0,
+) -> np.ndarray:
+    """JointDNN-style layer-granularity multi-UAV MILP adaptation.
+
+    The original two-tier placement principle is extended to one binary
+    layer-to-UAV variable per pair plus cross-UAV boundary variables. Selection
+    uses the repository's analytical compute/drop/link proxy and never queries
+    the learned PPL surrogate.
+    """
+
+    return milp_proxy_oracle_baseline(
+        channels,
+        config,
+        latency_reference,
+        time_limit_seconds=time_limit_seconds,
+    )
+
 def coedge_adaptive_partition_baseline(
     channels: np.ndarray,
     config: ResourceConstrainedConfig,

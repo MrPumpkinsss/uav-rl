@@ -18,7 +18,7 @@
 - [当前入口](#当前入口)
 - [目录结构](#目录结构)
 - [当前推荐实验和结论](#当前推荐实验和结论)
-- [当前最强可部署 PPO 模型与部署方式](#当前最强可部署-ppo-模型与部署方式)
+- [当前推荐 PPO checkpoint 与部署方式](#当前推荐-ppo-checkpoint-与部署方式)
 - [实验结果与分析](#实验结果与分析)
 - [检查](#检查)
 - [命名规则](#命名规则)
@@ -47,7 +47,10 @@
 | 真实 CodeLlama PPO | `scripts/ppo/train.py` |
 | layerwise surrogate PPO + 普通 Top-K | `scripts/ppo/train_layerwise_topk.py` |
 | frozen candidate 真实模型验证 | `scripts/ppo/validate_true_policy.py` |
-| common-seed baseline 对比 | `scripts/ppo/compare_general_assignment_baselines.py` |
+| 历史 common-seed 真实 baseline 对比 | `scripts/ppo/compare_general_assignment_baselines.py` |
+| 系统/启发式 surrogate screening | `scripts/baselines/compare_system_baselines.py` |
+| 冻结系统 baseline 的真实 LLM 评估 | `scripts/baselines/evaluate_frozen_system_baselines_true.py` |
+| 简单 RL 算法对比（PPO/A2C/DQN） | `scripts/rl/compare_algorithms.py` |
 | surrogate 数据采集 | `scripts/surrogate/collect_general_assignment.py` |
 | surrogate ensemble 训练 | `scripts/surrogate/train_general_assignment.py` |
 | coverage / tail 诊断 | `scripts/surrogate/diagnose_coverage.py` |
@@ -66,9 +69,11 @@ src/uav_rl/       当前 Python 实现
   metrics/        PPL 和评估指标
   models/         activation dropout 组件
   benchmarks/     可复用 benchmark evaluator
-  rl/             PPO、actor-critic、环境和 oracle
+  rl/             PPO、A2C、DQN、共用逐层 MDP 和 policy I/O
 scripts/          当前可执行入口
-  ppo/            PPO 训练、验证和 baseline
+  baselines/      系统/启发式 screening 与冻结真实评估
+  ppo/            PPO 训练、验证和历史 baseline
+  rl/             PPO/A2C/DQN 受控算法比较
   surrogate/      surrogate 数据、诊断和训练
   benchmarks/     一次性测量
   maintenance/    仓库维护
@@ -82,36 +87,56 @@ docs/             项目结构和命名说明
 
 ## 当前推荐实验和结论
 
-当前 common-seed 真实验证使用 32 个无线 channel、4 个 activation-noise seed 和 CodeLlama-7b。common-seed 的意思是：所有方法使用完全相同的 channel 和 noise seed，因此 reward 可以直接比较：
+当前结果必须按证据层级阅读，不能把 surrogate screening 和真实 LLM 验证混成一张“最终排名表”。
 
-- 当前 200000 episode PPO Top-1 reward：`-0.389706`
-- 当前实验中观测到的最佳 Top-K Top-1 reward：`-0.387903`（10000 episode 快照）
-- 当前 200000 episode Top-5 true oracle reward：`-0.381480`
-- 当前 200000 episode deterministic PPO reward：`-0.384838`
-- 当前最强可部署模型：High-augmented PPO deterministic policy，reward `-0.384838`；CoEdge-style adaptive partition 为最强非 PPO baseline。
-- 当前 common-seed 中最强非 PPO 可部署 baseline：CoEdge-style adaptive partition，reward `-0.390294`
-- 当前最强非 PPO surrogate 搜索 baseline：surrogate simulated annealing，reward `-0.406119`
-- 新增 dynamic programming baseline reward：`-0.480867`（可变长度连续区块，不是固定 4×8）
+### 已完成的真实 CodeLlama 证据
 
-原始全 baseline 对比位于 `artifacts/runs/surrogate_ppo/common_seed_baseline_comparison.json` 和 `.md`；最新 200000 episode PPO 验证位于 `artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/topk_true_validation.json`。
+旧 common-seed 真实验证使用 32 个无线 channel、4 个 activation-noise seed 和 `codellama/CodeLlama-7b-hf`：
 
-Diverse Top-K 已完成验证但没有带来提升，代码和产物归档在：
+- 200000-episode deterministic PPO reward：`-0.384838`；
+- 200000-episode surrogate-selected Top-1 reward：`-0.389706`；
+- 10000-episode 快照曾取得更好的 Top-1：`-0.387903`；
+- 200000-episode Top-5 true oracle：`-0.381480`，但它不可部署；
+- 旧 benchmark 中 CoEdge-inspired heuristic reward：`-0.390294`。
+
+这些真实结果说明当前 PPO checkpoint 是**项目内推荐的在线部署 policy**，但不能据此宣称它已经超过所有后来新增的系统 baseline，因为 JointDNN-MUAV、PipeEdge-UAV、Petals-balanced 和新版模拟退火尚未在同一真实 LLM 协议下全部复验。
+
+### 新增的 64-channel surrogate screening
+
+2026-08-30 完成了 64 个 held-out channel 的系统/启发式对比，所有 deployment 已冻结：
+
+- PPO deterministic：`-0.383815`，`8.23 ms/channel`；
+- simulated annealing：`-0.373881`，相对 PPO 配对差值 `+0.009935`，95% CI `[-0.005966, 0.025835]`，`2860.17 ms/channel`；
+- Neurosurgeon-inspired：`-0.388179`；
+- JointDNN-MUAV：`-0.398647`；
+- PipeEdge-UAV：`-0.431887`，但取得最低 latency `0.700022 s`；
+- Petals-balanced：`-0.802524`。
+
+模拟退火的 surrogate mean 略高于 PPO，但置信区间跨过 0，不能宣称稳定领先；它的在线搜索开销约为 PPO 的 `348` 倍。当前最稳妥的结论是：**PPO 提供了具有竞争力的质量-时延折中和显著更低的在线决策成本，但新增系统 baseline 的最终排名仍需冻结 deployment 的真实 LLM 评估确认。**
+
+关键结果路径：
+
+```text
+artifacts/runs/surrogate_ppo/common_seed_baseline_comparison.json
+artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/topk_true_validation.json
+artifacts/runs/system_baseline_comparison/authoritative_heuristics_64ch_2026-08-30/
+```
+
+Diverse Top-K 已完成验证但没有带来提升，当前正式入口继续使用普通 Top-K；历史代码和产物位于：
 
 ```text
 legacy/experiments_2026_08/ppo/diverse_topk/
 artifacts/archive/2026-08-20/diverse_topk/
 ```
 
-当前正式入口使用普通 Top-K 候选机制，不使用已归档的 Diverse Top-K 变体。当前结果对应 high-augmented surrogate + layerwise Top-K PPO。
+## 当前推荐 PPO checkpoint 与部署方式
 
-## 当前最强可部署 PPO 模型与部署方式
-
-当前最强的可部署模型是 PPO，而不是某个 baseline。公开的 PPO checkpoint 只有一个文件，但提供两种推理模式：deterministic 和 Top-K。当前默认、也是真实 reward 最好的部署方式是 200000 episode checkpoint 的 deterministic 模式（reward `-0.384838`）；Top-K 只作为候选增强和实验对照。Surrogate 只用于训练和候选排序，不是部署模型。
+当前推荐在线部署使用 200000-episode high-augmented PPO checkpoint 的 deterministic 模式。这里的“推荐”表示它已经完成现有真实 CodeLlama 验证、在线开销低并且接口稳定，**不表示已经证明它在所有新增 baseline 上全局最优**。Top-K 保留为候选增强和诊断工具；surrogate 只用于训练和候选排序，不是最终质量证据。
 
 | 组件 | 当前推荐版本 | Git 路径 | 说明 |
 | --- | --- | --- | --- |
-| Surrogate | High-augmented 5-model ensemble | `artifacts/models/ppl_surrogate_general_assignment_high_augmented_ensemble.pth` | PPO 训练阶段的质量 reward |
-| PPO policy | High-augmented layerwise PPO（200000 episode） | `artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth` | 同一个 checkpoint 支持 deterministic 和 Top-K；当前默认推荐 deterministic，200000 episode true reward 为 `-0.384838` |
+| Surrogate | High-augmented 5-model ensemble | `artifacts/models/ppl_surrogate_general_assignment_high_augmented_ensemble.pth` | PPO 训练和低成本 screening 的质量 reward |
+| PPO policy | High-augmented layerwise PPO（200000 episode） | `artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth` | 默认 deterministic；旧 32-channel 真实 reward 为 `-0.384838` |
 
 该 policy 的训练方式是：
 
@@ -119,10 +144,10 @@ artifacts/archive/2026-08-20/diverse_topk/
 - 训练 reward 使用 frozen surrogate，不在每个 PPO action 上调用真实 CodeLlama；
 - 先用 256 个 teacher channels 和 24 个 teacher candidates 做 behavior-cloning warm start；
 - 已完成 200000 episode PPO 微调；其中 1000 到 200000 episode 均从同一个 `training_state.pth` 无损续训；
-- “Top-K”表示先生成多个候选；当前每个 channel 生成 20 个候选，用 surrogate 排序，实际部署选择其中排名第 1 的候选（Top-1）；真实验证另外保留前 5 个候选，计算不可部署的 Top-5 true oracle 上界；
-- 最终用真实 CodeLlama 在 held-out channel/noise seed 上验证。
+- deterministic 模式逐层选择概率最大的 UAV；Top-K 模式每个 channel 生成 20 个候选并按 surrogate 排序；
+- 最终结论必须使用 held-out channel/noise seed 上的真实 LLM 验证。
 
-这里的“当前最强可部署模型”指 200000 episode PPO checkpoint 的 deterministic 推理结果。需要区分两个指标：在 Top-K surrogate-selected Top-1 上，当前实验观察到的最好值仍是 10000 episode 快照（`-0.387903`）；在 deterministic deployment 上，200000 episode 是目前更好的 PPO 结果（`-0.384838`）。Top-5 true oracle 需要用真实 CodeLlama 在候选中事后挑选，不能作为实际部署策略。
+需要区分三个指标：deterministic 是默认可部署策略；surrogate-selected Top-1 是候选排序后的可部署策略；Top-5 true oracle 会在事后调用真实模型选择候选，只用于诊断候选生成上限，不能作为实际部署方法。
 
 ### 3000 episode 延长训练结果（历史对照）
 
@@ -137,7 +162,7 @@ artifacts/archive/2026-08-20/diverse_topk/
 | PPO Top-5 true oracle | -0.391821 | **-0.384987** |
 | invalid fraction | 0 | 0 |
 
-PPO Top-1 相比 1000 episode 快照提升约 2.00%，但仍略低于当前 CoEdge-style adaptive partition 的 -0.390294。这次结果是历史延长训练对照；后续 200000 episode 结果见下节。
+PPO Top-1 相比 1000 episode 快照提升约 2.00%，但仍略低于当前 CoEdge-inspired layer greedy 的 -0.390294。这次结果是历史延长训练对照；后续 200000 episode 结果见下节。
 
 3000 episode 的历史数值保留在本 README 的历史对照表中；当前验证文件已由 200000 episode 结果覆盖。最终 policy 保存在 `artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth`。
 
@@ -169,7 +194,7 @@ candidate_policies/episode_200000.pth
 | PPO Top-5 true oracle | **-0.378790** | -0.381480 |
 | invalid fraction | 0 | 0 |
 
-200000 episode 让 deterministic policy 相比 10000 episode 提升约 3.73%，但 Top-K surrogate-selected Top-1 下降约 0.46%，Top-5 true oracle 下降约 0.71%。这说明继续增加 PPO episode 已经不是当前主要瓶颈：policy 的确定性输出在变好，但 surrogate 对多候选的排序仍会引入选择误差。200000 episode 的 Top-1 reward `-0.389706` 仍略优于 CoEdge-style adaptive partition 的 `-0.390294`，差距约 0.15%，因此需要在更大的 held-out 集合上复验稳定性，不能只凭这一组 32 channel 宣称显著领先。
+200000 episode 让 deterministic policy 相比 10000 episode 提升约 3.73%，但 Top-K surrogate-selected Top-1 下降约 0.46%，Top-5 true oracle 下降约 0.71%。这说明继续增加 PPO episode 已经不是当前主要瓶颈：policy 的确定性输出在变好，但 surrogate 对多候选的排序仍会引入选择误差。200000 episode 的 Top-1 reward `-0.389706` 仍略优于 CoEdge-inspired layer greedy 的 `-0.390294`，差距约 0.15%，因此需要在更大的 held-out 集合上复验稳定性，不能只凭这一组 32 channel 宣称显著领先。
 
 最终真实验证结果保存在 `artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/topk_true_validation.json`；最新 policy 保存在同目录的 `best_policy.pth`。训练状态 `training_state.pth` 仍保留，可继续 resume，但下一步更值得优先改进 Top-K candidate ranking 或评估 deterministic deployment，而不是盲目增加 episode。
 
@@ -370,7 +395,7 @@ python scripts/surrogate/train_general_assignment.py `
 
 policy 是 autoregressive layerwise actor-critic：从第 0 层到第 31 层依次选择 UAV。每一步 observation 包含 channel、当前 layer index、各 UAV 已使用的 memory/energy、上一层 UAV 等信息。action mask 会屏蔽违反资源约束的 UAV。
 
-当前 trainer 的 `max_policy_boundaries=4`，表示一次 rollout 最多允许 4 次“从一台 UAV 切换到另一台 UAV”。它不表示每台 UAV 最多只能放 8 层，也不表示只能使用 4 台 UAV：boundary 可以出现在任意两个相邻 layer 之间，所以 PPO 可以生成 1 到 5 个连续区块，区块长度也不要求相等。区块数也不等于 UAV 数量，因为 policy 可以在后面的 layer 切回之前用过的 UAV。资源模型本身支持任意 layer-to-UAV assignment；这个最多 4 次切换是当前 PPO policy 的实验限制，修改它会改变训练分布，应单独做实验。
+当前 trainer 的 `max_policy_boundaries=4` 实际是 **boundary freeze threshold**，不是数学意义上的硬上限：达到 4 次切换后，如果继续留在当前 UAV 仍满足资源约束，mask 会强制继续留在该 UAV；如果当前 UAV 已无法继续承载下一层，资源可行性优先，policy 仍可再切换。因此实验必须同时报告实际 boundary count 和 threshold-exceedance fraction，不能把该参数直接写成“最多 4 个 boundary”。它不表示每台 UAV 最多只能放 8 层，也不表示只能使用 4 台 UAV。修改该阈值会改变训练分布，应单独做敏感性实验。
 
 ### reward 和 PPO update
 
@@ -427,6 +452,11 @@ python scripts/ppo/train_layerwise_topk.py `
 本轮延长训练复用了 `layerwise_topk_high_augmented_2026-08-20/training_state.pth`，只增加 `training_episodes`，没有重新初始化 policy、optimizer 或随机数状态。续训从 10000 episode 延长到 200000 episode，新增 checkpoint 按每 20000 episode 保存为 20000、40000、…、200000；原有的 200、500 和 1000 间隔历史 checkpoint 保留不覆盖。
 
 只有在确认 run directory 对应的 config 和 surrogate checkpoint 没有变化时才应 resume。改变 surrogate、resource config、seed 或 policy architecture 后应创建新的 run directory。
+
+
+### 不同 RL 算法 baseline
+
+为避免只与 heuristic 比较，项目新增了受控的 `PPO vs A2C vs masked Double-DQN` 实验。三种算法从头训练，使用相同 state、离散 UAV action、资源 mask、boundary freeze threshold、surrogate reward、channel seed、episode 数和独立 evaluation channels。该表只比较 RL update rule，不与使用 teacher warm-start 的当前推荐 PPO checkpoint 混为一表。训练入口为 `scripts/rl/compare_algorithms.py`，冻结 checkpoint 后的真实 CodeLlama 评估入口为 `scripts/rl/evaluate_algorithms_true.py`；完整协议见 `docs/RL_BASELINE_PROTOCOL.md`。
 
 ## Top-K 和真实模型验证
 
@@ -489,6 +519,54 @@ artifacts/runs/surrogate_ppo/common_seed_baseline_comparison.json
 artifacts/runs/surrogate_ppo/common_seed_baseline_comparison.md
 ```
 
+### 新增系统/启发式 baseline 的 64-channel surrogate screening（2026-08-30）
+
+为了避免实验只和内部 proxy heuristic 比较，新增了 `JointDNN-MUAV`、`PipeEdge-UAV`、`Petals-balanced` 和明确标注为 inspired 的双 UAV 单切分方法，并与 200000-episode deterministic PPO、模拟退火和 random feasible 在同一组 64 个 held-out channel 上冻结 deployment。该阶段只使用 frozen high-augmented surrogate，尚不是最终真实 CodeLlama 结果；所有 channel 和 deployment 已保存，后续真实模型评估不得重新选择动作。
+
+结果目录：
+
+```text
+artifacts/runs/system_baseline_comparison/authoritative_heuristics_64ch_2026-08-30/
+```
+
+复现 surrogate screening：
+
+```powershell
+$env:PYTHONPATH = "src"
+python scripts/baselines/compare_system_baselines.py `
+  --channels 64 `
+  --channel-seed 20260910 `
+  --jointdnn-time-limit 1.0 `
+  --annealing-steps 1024 `
+  --random-seed 20260911 `
+  --surrogate-device cuda `
+  --output-dir artifacts/runs/system_baseline_comparison/authoritative_heuristics_64ch_2026-08-30
+```
+
+对已经冻结的同一批 deployment 运行真实 LLM 评估：
+
+```powershell
+python scripts/baselines/evaluate_frozen_system_baselines_true.py `
+  --comparison-dir artifacts/runs/system_baseline_comparison/authoritative_heuristics_64ch_2026-08-30 `
+  --model-id "<matching local model directory>" `
+  --noise-samples 4 `
+  --device cuda
+```
+
+真实评估脚本只读取 `channels.npy` 和 `frozen_deployments.npz`，不会在看到真实 PPL 后重新搜索或替换 deployment。
+
+| 方法 | surrogate reward ↑ | 与 PPO 配对差值及 95% CI | log-PPL ratio ↓ | latency (s) ↓ | 决策时间 (ms/channel) ↓ |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **PPO deterministic** | **-0.383815** | 0 | 0.207401 | 0.735128 | **8.23** |
+| Simulated annealing | -0.373881 | +0.009935 `[-0.005966, 0.025835]` | **0.203512** | 0.714160 | 2860.17 |
+| Neurosurgeon-inspired | -0.388179 | -0.004363 `[-0.020974, 0.012247]` | 0.238366 | 0.705948 | 337.30 |
+| JointDNN-MUAV | -0.398647 | -0.014832 `[-0.032614, 0.002951]` | 0.261025 | 0.703687 | 2164.90 |
+| PipeEdge-UAV | -0.431887 | -0.048072 `[-0.065950, -0.030194]` | 0.330299 | **0.700022** | 160.30 |
+| Petals-balanced | -0.802524 | -0.418709 `[-0.444753, -0.392664]` | 0.531086 | 1.409244 | 159.54 |
+| Random feasible | -3.477950 | -3.094135 `[-3.634770, -2.553500]` | 2.838805 | 5.402419 | 10.67 |
+
+模拟退火在 surrogate mean 上比 PPO 高约 `0.0099`，但配对 95% CI 跨过 0，当前不能宣称它稳定优于 PPO；同时它的在线决策开销约为 PPO 的 `348` 倍。PPO 与 Neurosurgeon-inspired、JointDNN-MUAV 的均值差距也尚未达到这组 surrogate paired interval 下的明确分离。PipeEdge-UAV 的 latency 最低，但 quality proxy 较差，因此综合 reward 低于 PPO。最终结论必须以冻结 deployment 的真实 LLM 评估为准。
+
 ### 结果表
 
 reward 是负的综合代价，因此越接近 0 越好；PPL 和 latency 越小越好。下表的 PPO 行已经更新为 200000 episode 续训结果，其他 baseline 保持原 common-seed benchmark 的结果。默认部署推荐 deterministic 行；Top-K 行用于候选增强和对照。最后一列统一相对当前默认部署的 200000 episode deterministic reward（`-0.384838`）计算。`ppo_topk_true_oracle` 仍然是不可部署的候选上界，不能和实际 policy 等价比较。
@@ -498,12 +576,12 @@ reward 是负的综合代价，因此越接近 0 越好；PPL 和 latency 越小
 | **PPO deterministic (200000 ep.)** | **当前默认部署：逐层 argmax rollout** | **-0.384838** | — | — | **—** |
 | **High-augmented PPO Top-1 (200000 ep.)** | **surrogate 排序的 20-candidate Top-K** | **-0.389706** | — | — | -1.26% |
 | PPO Top-5 true oracle (200000 ep.) | 候选集真实模型上界（不可部署） | **-0.381480** | — | — | +0.87% |
-| **CoEdge-style adaptive partition** | **自适应逐层边际代价分配** | **-0.390294** | 16.228 | 0.722 | -1.42% |
+| **CoEdge-inspired layer greedy** | **自适应逐层边际代价分配** | **-0.390294** | 16.228 | 0.722 | -1.42% |
 | **Surrogate simulated annealing** | beam 512 初始化 + surrogate 模拟退火 | -0.406119 | 16.986 | 0.708 | -5.53% |
 | **Surrogate local search** | beam 512 初始化 + surrogate 局部改进 | -0.411060 | 17.245 | 0.704 | -6.81% |
 | Constrained genetic surrogate | 约束遗传算法 + frozen surrogate | -0.417787 | 17.480 | 0.704 | -8.56% |
 | Proxy beam 128 | 任意逐层 assignment 的 additive proxy beam | -0.419458 | 17.567 | **0.701** | -9.00% |
-| Neurosurgeon-style best split | 两 UAV 单切分点枚举 | -0.419458 | 17.567 | 0.701 | -9.00% |
+| Neurosurgeon-inspired two-UAV split | 两 UAV 单切分点枚举 | -0.419458 | 17.567 | 0.701 | -9.00% |
 | MILP proxy oracle | 线性化 proxy 的 SciPy/HiGHS 求解器参考 | -0.421463 | 17.658 | 0.700 | -9.52% |
 | Wide proxy beam 512 | 更宽的 additive proxy beam | -0.421463 | 17.658 | 0.700 | -9.52% |
 | Fixed-eight Strong-link | 固定 4 段 × 8 层的链路优先启发式 | -0.475804 | **15.310** | 1.027 | -23.64% |
@@ -520,34 +598,36 @@ reward 是负的综合代价，因此越接近 0 越好；PPL 和 latency 越小
 - **High-augmented PPO Top-1**：这是一个 channel-conditioned、autoregressive 的 actor-critic。policy 从第 0 层到第 31 层逐层选择 UAV，并把 channel、当前资源余量和上一层 UAV 作为状态。训练时只调用 frozen high-augmented surrogate reward；每个 channel 生成 20 条随机 rollout，用 surrogate 排序，实际部署输出第 1 名。200000 episode 版本的真实 Top-1 reward 是 `-0.389706`；同一 run 的 10000 episode 快照曾达到 `-0.387903`，说明继续训练后的主要问题不在 policy 是否能学习，而在 surrogate 对候选的排序稳定性。
 - **PPO deterministic**：使用同一套 PPO 权重，但每一步选择概率最高的 UAV，不进行 20 候选采样，也不使用 Top-K 排序。它测量的是 policy 本身的单轨迹能力。200000 episode 的 reward 为 `-0.384838`，优于 Top-1，说明长时间训练改善了 policy 的主模式，但候选生成/排序机制反而可能把更好的确定性方案筛掉。
 - **PPO Top-5 true oracle**：先生成 PPO 的候选集，再对其中 5 个候选逐个调用真实 CodeLlama，从中选择真实 reward 最好的一个。它不是部署策略，因为实际部署不能事后知道真实 PPL；它只回答“PPO 候选生成能力的上限在哪里”。200000 episode 的 oracle reward 为 `-0.381480`，与 Top-1 的差距约 `0.008226`。
+- **JointDNN-MUAV**：JointDNN layer-granularity placement 原则的多 UAV MILP 适配。每层只分配给一台 UAV，并显式建模跨 UAV boundary、memory、compute energy 和解析的 compute/drop/link proxy；选择阶段不调用 PPL surrogate。名称表示问题思想的扩展，不是原 two-tier mobile-cloud 代码的逐行复现。
+- **PipeEdge-UAV**：限制每台 UAV 只承担一个连续 layer block，并用动态规划联合选择 UAV 顺序和 block boundaries，目标是最小化解析的 computation + communication latency。它不使用 PPL surrogate，因此可用于检验纯 pipeline latency scheduler 在质量-时延联合目标下的局限。
+- **Petals-balanced**：面向 LLM block pipeline 的平衡启发式。它选择不重复的 UAV chain 和连续 Transformer blocks，优先最小化最慢 pipeline stage，再以总 latency 打破并列；最终仍由统一 reward evaluator 评分。
+- **Neurosurgeon-inspired two-UAV split**：枚举一个切分点和两台 UAV，把前缀连续层交给一台 UAV、后缀交给另一台 UAV，再按 additive proxy 选最优方案。它是文献结构的适配对照，不是原系统的完整复现。
 - **Proxy beam 128**：从第 0 层开始扩展任意 layer-to-UAV assignment，每一层保留 proxy 分数最好的 128 条部分路径，并提前剪掉违反资源约束的路径。proxy 由边界丢包、计算代价和归一化通信 latency 组成，不包含真实 CodeLlama PPL 的非线性。它表达能力比固定四段方法强，但 proxy 目标和真实 reward 仍有偏差。
 - **Wide proxy beam 512**：与 beam 128 相同，但每一层保留 512 条路径。它用于检验“增加搜索宽度是否能弥补 proxy 误差”。本轮结果反而略差于 beam 128，说明错误的 proxy 排序会让更宽的搜索保留更多“proxy 看起来好、真实模型并不好”的路径；单纯扩大 beam 不是可靠提升方向。
 - **Surrogate local search**：先用 beam 512 生成一个可行初始 assignment，再在 frozen surrogate reward 上做 3 轮邻域搜索。邻域包括单层换 UAV 和连续区块迁移，每次都重新检查资源约束。它比 beam 512 有小幅改善，但只能接受局部改进，容易停在局部最优。
 - **Surrogate simulated annealing**：同样从 beam 512 初始化，但允许以随温度下降的概率接受暂时变差的邻居，再逐步收敛。它比只接受改进的 local search 更容易跳出局部最优，是本轮最强的 surrogate 搜索型 baseline；它仍然不调用真实 CodeLlama 来指导搜索。
-- **CoEdge-style adaptive partition**：这是论文思想的适配版启发式，不是原论文代码的逐行复现。它逐层比较“继续留在当前 UAV”和“切换到另一个 UAV”的边际计算、memory、energy、链路丢包和负载代价，动态决定区块边界和使用的 UAV 数量。它不固定 4 段、不要求每段 8 层，也不使用真实模型搜索，因此适合作为强的可部署 heuristic 对照。
+- **CoEdge-inspired layer greedy**：这是论文思想的适配版启发式，不是原论文代码的逐行复现。它逐层比较“继续留在当前 UAV”和“切换到另一个 UAV”的边际计算、memory、energy、链路丢包和负载代价，动态决定区块边界和使用的 UAV 数量。它不固定 4 段、不要求每段 8 层，也不使用真实模型搜索，因此适合作为强的可部署 heuristic 对照。
 - **Constrained genetic surrogate**：把 32 个 UAV 编号看成 chromosome，维护一组可行 assignment，经过单点/区块交叉、mutation 和资源修复后，用 frozen surrogate reward 选择下一代。它探索范围比局部搜索广，但本轮 population 和 generation 预算有限，且 surrogate 排序误差会被遗传选择逐代放大，因此没有超过模拟退火。
 - **MILP proxy oracle**：把逐层计算、边界切换和部分通信代价线性化，交给 SciPy/HiGHS 求解器寻找 proxy 最优解，再用完整资源约束复核。名称中的 oracle 只表示“对这个线性 proxy 求解得比较充分”，不是对真实 CodeLlama PPL 的全局最优。共享带宽的非线性 latency 和真实 PPL 没有完整进入 MILP 目标，所以它与 beam 512 得到相同 reward 并不奇怪。
-- **Neurosurgeon-style best split**：枚举一个切分点和两台 UAV，把前缀连续层交给一台 UAV、后缀交给另一台 UAV，再按 additive proxy 选最优方案。这是文献结构的轻量对照，搜索空间只有“两台 UAV + 一个 boundary”，不能表达多段、多 UAV 或中途切回，因此不能代表一般 layer-to-UAV assignment 的能力上限。
 - **Fixed-eight Strong-link**：先把 32 层硬切成 4 个长度为 8 的连续区块，再选择 4 台 UAV，并按跨区块链路质量排列。它容易解释、计算便宜，但区块边界和区块数量都固定，不能根据 channel 自适应地改变切分；它通常能得到较低 PPL，却可能产生更高的跨 UAV latency。
 - **Dynamic programming**：在连续区块假设下，用 DP 枚举 boundary 和 UAV 顺序；每个区块长度可以不同但不超过 8 层，且当前实现不允许后续切回已使用 UAV。DP 优化的是“边界丢包 + 归一化 latency”的 additive proxy，不是完整真实 reward，所以比 fixed-eight 灵活，但仍受连续区块和 proxy 目标限制。
 - **Surrogate random search 1024**：每个 channel 独立随机生成 1024 个资源可行的任意 assignment，用 surrogate reward 选最优。它不学习跨 channel 的 policy，只测量“给搜索器较大随机预算时，surrogate 本身能否找到好方案”，因此可以用来区分 PPO 的 policy learning 收益和单纯采样收益。
 - **Random feasible**：只随机采样并保留资源可行 assignment，不看 channel 质量、drop vector、PPL surrogate 或 latency 目标。它是 sanity-check baseline，用于验证资源约束和 reward 评估没有把任意可行方案误判成好策略。
 
-这些 baseline 的实现分别在 [`src/uav_rl/resource_baselines.py`](src/uav_rl/resource_baselines.py) 和 [`scripts/ppo/compare_general_assignment_baselines.py`](scripts/ppo/compare_general_assignment_baselines.py)；统一的真实评估协议和缓存逻辑也在后一个脚本中。
+系统和启发式 baseline 的实现位于 [`src/uav_rl/resource_baselines.py`](src/uav_rl/resource_baselines.py)。旧 32-channel 真实比较入口是 [`scripts/ppo/compare_general_assignment_baselines.py`](scripts/ppo/compare_general_assignment_baselines.py)；新增 64-channel screening 与冻结真实评估入口分别是 [`scripts/baselines/compare_system_baselines.py`](scripts/baselines/compare_system_baselines.py) 和 [`scripts/baselines/evaluate_frozen_system_baselines_true.py`](scripts/baselines/evaluate_frozen_system_baselines_true.py)。
 
 ### 实验分析
 
-1. **200000 episode 的 deterministic policy 已超过 CoEdge，但 Top-K Top-1 只略胜。** deterministic PPO 为 `-0.384838`，CoEdge 为 `-0.390294`；实际部署若采用 deterministic 输出，当前 PPO 有约 `1.25%` 的 reward 优势。surrogate-selected Top-1 为 `-0.389706`，只比 CoEdge 高约 `0.15%`，因此 Top-K 选择仍是当前最脆弱的环节。
-2. **继续训练并没有单调改善 Top-K。** 10000 episode 快照的 Top-1 是 `-0.387903`，200000 episode 变为 `-0.389706`；相反 deterministic 从 `-0.399736` 改善到 `-0.384838`。这表明长训练确实改变了 policy，但 surrogate 的候选排序误差会抵消部分 policy 收益。
-3. **Top-5 true oracle 说明 PPO 仍有候选生成潜力。** 200000 episode 的 Top-5 true oracle 为 `-0.381480`，比 surrogate-selected Top-1 高约 `0.008226`。这部分差距来自真实模型与 surrogate 排序不一致，而不是 policy 完全找不到好 assignment。
-4. **CoEdge 是当前最强的可部署 heuristic 对照，但不是 PPO 的上界。** CoEdge 不依赖真实模型，也不使用 PPO 候选集；它可以探索 PPO 当前候选集之外的 assignment。因此它略高于 Top-1 时，不能简单解释为 PPO 学习失败，而应检查 PPO 的 action space、teacher 和 candidate ranking。
-5. **模拟退火是当前最强的 surrogate 搜索型 baseline。** 它通过接受少量暂时变差的邻居跳出 local search 的局部最优，reward `-0.406119`；但仍低于 200000 episode PPO，说明 channel-conditioned policy learning 比独立 surrogate 搜索更有效。
-6. **beam 宽度不是主要瓶颈。** beam 512（`-0.421463`）没有超过 beam 128（`-0.419458`），说明 additive proxy 的排序偏差比候选数量更重要；继续扩大 beam 可能只会扩大错误排序的影响。
-7. **固定结构 baseline 的低 reward 有明确原因。** fixed-eight 和 DP 都限制了连续区块结构，且主要优化链路/latency proxy；它们的 PPL 可以较低，但跨 UAV 通信和分段 latency 较高，最终综合 reward 不占优。
-8. **表格存在两种证据层级。** PPO 的 200000 episode reward 来自最新独立延长训练验证；其他 baseline 的 PPL/latency/reward 来自之前同一 common-seed 全量 benchmark。channel、noise seed、真实模型和资源约束一致，但这次没有重新把全部 baseline 与 200000 PPO 放在同一进程中重跑，因此 README 对此明确标注。
-9. **下一步应优先改进 candidate ranking。** 重点包括保存并分析 surrogate 与真实 reward 的 paired residual、用 deterministic policy 作为候选之一、增加真实验证中的候选去重和 uncertainty-aware reranking，而不是继续单纯增加 episode。
+1. **当前证据分成真实 LLM 与 surrogate screening 两层。** 旧 32-channel 表包含真实 CodeLlama 指标，但没有覆盖刚加入的全部系统 baseline；新 64-channel 表覆盖 JointDNN-MUAV、PipeEdge-UAV、Petals-balanced 和更大预算模拟退火，但目前只使用 frozen surrogate。两张表不能直接合并成最终排名。
+2. **PPO 的主要优势是在线决策效率。** 新 screening 中 PPO 为 `8.23 ms/channel`，JointDNN-MUAV 为 `2164.90 ms/channel`，Neurosurgeon-inspired 为 `337.30 ms/channel`，模拟退火为 `2860.17 ms/channel`。即使某些逐 channel 搜索方法均值接近或略高，PPO 仍提供了两个到三个数量级更低的在线开销。
+3. **模拟退火是当前最强的 surrogate 搜索对照，但尚未显著分离。** 它相对 PPO 的配对 reward 差值为 `+0.009935`，95% CI 为 `[-0.005966, 0.025835]`。因此不能写成“模拟退火优于 PPO”，也不能写成“PPO 优于模拟退火”。
+4. **JointDNN-MUAV 和 Neurosurgeon-inspired 是有竞争力的解析 baseline。** 两者与 PPO 的配对 95% CI 都跨过 0；真实 LLM 复验前，最合适的表述是“competitive but substantially slower online optimization baselines”。
+5. **PipeEdge-UAV 展示了纯 latency 优化的 trade-off。** 它取得最低 latency `0.700022 s`，但 predicted log-PPL ratio 更高，综合 reward 显著低于 PPO。这支持在 UAV LLM 分割中同时建模质量损失与通信/计算时延。
+6. **Petals-balanced 是 LLM-specific 结构对照，不是强 reward optimizer。** 其四段平衡 pipeline 增加了 boundary 和通信开销，适合说明通用的 block balancing 不能替代 channel-conditioned quality-aware placement。
+7. **Top-K candidate ranking 仍是 PPO 内部的独立问题。** 200000 episode deterministic 优于同 checkpoint 的 surrogate-selected Top-1，而 Top-5 true oracle 又优于 Top-1；这说明候选生成有潜力，但 surrogate 排序仍会损失部分真实 reward。
+8. **下一步不是继续增加复杂 RL。** RL 表只保留 PPO、A2C 和 masked Double-DQN 作为代表性算法对照；论文主表应聚焦 JointDNN-MUAV、PipeEdge-UAV、Petals-balanced、Neurosurgeon-inspired、模拟退火、random feasible 和 PPO。
 
-当前更准确的结论是：**200000 episode PPO 的 deterministic policy 已经超过当前 CoEdge-style adaptive partition；Top-K surrogate-selected PPO 也略高于 CoEdge，但优势只有约 0.15%，且 10000 episode 的 Top-K 快照更好。当前实验最需要解决的是 surrogate candidate ranking 的稳定性。**
+当前最准确的总结是：**PPO 是项目内已经完成真实验证且在线开销最低的推荐 policy；在新增 64-channel surrogate screening 中，它与模拟退火、Neurosurgeon-inspired 和 JointDNN-MUAV 的质量差距尚未形成稳定统计分离。最终主表必须使用已经冻结的 deployment 完成同一真实 LLM 协议复验。**
 
 ## 实验复现与可信度检查
 
@@ -710,7 +790,7 @@ f(deployment, channel) = full reward
 | 对照 | General surrogate ensemble | [`artifacts/models/ppl_surrogate_general_assignment_ensemble.pth`](artifacts/models/ppl_surrogate_general_assignment_ensemble.pth) | 当前通用 assignment surrogate 默认 checkpoint | 5.41 MiB | `c2fd82f0df6e56e83a80bc492b9f9460ec3fd09210b52d53ea3dd02418f921ff` |
 | **当前最好 surrogate** | **High-augmented surrogate ensemble** | [`artifacts/models/ppl_surrogate_general_assignment_high_augmented_ensemble.pth`](artifacts/models/ppl_surrogate_general_assignment_high_augmented_ensemble.pth) | common-seed baseline 对比使用的 surrogate | 5.41 MiB | `74a472278231db33560f6a57801a0af25a91d5d6bfa18a67bfe8fc203b0d84df` |
 | 对照 | Original Top-K PPO | [`artifacts/runs/surrogate_ppo/layerwise_topk_2026-08-20b/best_policy.pth`](artifacts/runs/surrogate_ppo/layerwise_topk_2026-08-20b/best_policy.pth) | 1000-episode 原始 Top-K PPO policy，使用通用 surrogate | 1.10 MiB | `be93b847e2bfb8cc1a889e8b0a36b034e05cb09568270731426d84554d176f48` |
-| **当前最强可部署 policy** | **High-augmented PPO（200000 episode）** | [`artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth`](artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth) | 默认 deterministic 部署，真实 reward `-0.384838`；同一 checkpoint 可切换 Top-K 模式 | 1.10 MiB | `7c70b8ca1dd01341cd49b931c2c4c075deb46ec91da9dc071f79b5f35acf46c6` |
+| **当前推荐可部署 policy** | **High-augmented PPO（200000 episode）** | [`artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth`](artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/best_policy.pth) | 默认 deterministic 部署，真实 reward `-0.384838`；同一 checkpoint 可切换 Top-K 模式 | 1.10 MiB | `7c70b8ca1dd01341cd49b931c2c4c075deb46ec91da9dc071f79b5f35acf46c6` |
 | 独立对照 | Direct true-PPL PPO | [`artifacts/models/ppo_true_ppl_multiseed_best.pth`](artifacts/models/ppo_true_ppl_multiseed_best.pth) | 不使用 surrogate、直接用真实 CodeLlama PPL 训练的 1000-episode PPO best policy | 4.84 MiB | `e424300aa7c113d72402cb4660873b43fe668d4a2d8e6d2fa1b9be9edf5b19f4` |
 
 文件大小使用 MiB 展示；SHA256 以 checkpoint 原始字节计算。模型可以 clone 后直接加载：surrogate 使用 `load_surrogate()`，PPO policy 使用对应 run 的 `SystemConfig`、resource config 和 policy 类型。
@@ -721,7 +801,8 @@ f(deployment, channel) = full reward
 - Top-K PPO 训练：`scripts/ppo/train_layerwise_topk.py`
 - 真实 PPL PPO 训练：`scripts/ppo/train.py`
 - high-augmented Top-K 配置：`artifacts/runs/surrogate_ppo/layerwise_topk_high_augmented_2026-08-20/run_config.json`
-- common-seed baseline：`artifacts/runs/surrogate_ppo/common_seed_baseline_comparison.json` 和 `.md`
+- 旧 common-seed 真实 baseline：`artifacts/runs/surrogate_ppo/common_seed_baseline_comparison.json` 和 `.md`
+- 新系统 baseline screening：`artifacts/runs/system_baseline_comparison/authoritative_heuristics_64ch_2026-08-30/`（当前为本地实验产物，发布前需显式纳入版本控制）
 - 真实 PPL PPO 报告：`artifacts/results/ppo_true_ppl_multiseed_1000_report.md`
 
 ### 不上传的训练状态
