@@ -10,6 +10,11 @@ import pytest
 from uav_rl.config import SystemConfig
 from uav_rl.resource_assignment import ResourceConstrainedConfig, validate_layerwise_deployment
 from uav_rl.resource_environment import ResourceDeploymentEnvironment
+from uav_rl.system_baselines import (
+    edge_shard_uav_baseline,
+    exact_grouped_reward_oracle,
+    hexgen_inspired_search_baseline,
+)
 from uav_rl.resource_baselines import (
     constrained_genetic_surrogate_baseline,
     coedge_adaptive_partition_baseline,
@@ -177,3 +182,77 @@ def test_pipeline_baselines_use_unique_contiguous_uav_blocks() -> None:
             validate_layerwise_deployment(deployment, config, channel=channel)
             block_uavs = deployment[np.r_[True, deployment[1:] != deployment[:-1]]]
             assert len(block_uavs) == len(set(block_uavs.tolist()))
+
+
+def test_recent_llm_baselines_are_feasible_reproducible_and_contiguous() -> None:
+    config = _small_config()
+    channels = np.asarray(
+        [
+            [
+                [20.0, 3.0, 15.0],
+                [3.0, 20.0, 8.0],
+                [15.0, 8.0, 20.0],
+            ]
+        ],
+        dtype=np.float32,
+    )
+    environment = ResourceDeploymentEnvironment(config, _DropSumQuality(), latency_reference=0.8)
+
+    edge_first = edge_shard_uav_baseline(channels, config, plans_per_state=4)
+    edge_second = edge_shard_uav_baseline(channels, config, plans_per_state=4)
+    hex_first = hexgen_inspired_search_baseline(
+        channels,
+        config,
+        environment,
+        population_size=8,
+        generations=2,
+        seed=17,
+    )
+    hex_second = hexgen_inspired_search_baseline(
+        channels,
+        config,
+        environment,
+        population_size=8,
+        generations=2,
+        seed=17,
+    )
+
+    assert np.array_equal(edge_first, edge_second)
+    assert np.array_equal(hex_first, hex_second)
+    for deployment in (edge_first[0], hex_first[0]):
+        validate_layerwise_deployment(deployment, config, channel=channels[0])
+        block_uavs = deployment[np.r_[True, deployment[1:] != deployment[:-1]]]
+        assert len(block_uavs) == len(set(block_uavs.tolist()))
+
+
+def test_exact_grouped_oracle_matches_manual_group_enumeration() -> None:
+    config = _small_config()
+    channel = np.full((3, 3), 20.0, dtype=np.float32)
+    environment = ResourceDeploymentEnvironment(config, _DropSumQuality(), latency_reference=0.8)
+    result = exact_grouped_reward_oracle(
+        channel,
+        environment,
+        num_groups=3,
+        batch_size=5,
+        max_assignments=100,
+    )
+
+    candidates = []
+    for assignment in itertools.product(range(config.system.num_uavs), repeat=3):
+        cuts = np.linspace(0, config.system.num_layers, 4, dtype=np.int64)
+        candidate = np.empty(config.system.num_layers, dtype=np.int64)
+        for group, uav in enumerate(assignment):
+            candidate[cuts[group] : cuts[group + 1]] = uav
+        try:
+            validate_layerwise_deployment(candidate, config, channel=channel)
+        except ValueError:
+            continue
+        candidates.append(candidate)
+    deployments = np.stack(candidates)
+    rewards, _ = environment.evaluate(
+        np.repeat(channel[None, ...], len(deployments), axis=0), deployments
+    )
+
+    assert result.total_assignments == 27
+    assert result.feasible_assignments == len(deployments)
+    assert result.reward == pytest.approx(float(rewards.max()))

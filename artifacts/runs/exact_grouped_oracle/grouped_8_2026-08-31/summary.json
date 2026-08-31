@@ -1,0 +1,58 @@
+{
+  "stage": "exact_grouped_surrogate_oracle",
+  "interpretation": "Exact only within the grouped action set; not a global oracle over all 32-layer assignments and not true-LLM evidence.",
+  "groups": 8,
+  "channels": 8,
+  "channel_seed": 20260920,
+  "reward_mean": -0.3569888137280941,
+  "rows": [
+    {
+      "channel_index": 0,
+      "reward": -0.3551010489463806,
+      "feasible_assignments": 194880,
+      "total_assignments": 390625
+    },
+    {
+      "channel_index": 1,
+      "reward": -0.3541526794433594,
+      "feasible_assignments": 194880,
+      "total_assignments": 390625
+    },
+    {
+      "channel_index": 2,
+      "reward": -0.34552207589149475,
+      "feasible_assignments": 194880,
+      "total_assignments": 390625
+    },
+    {
+      "channel_index": 3,
+      "reward": -0.3603828549385071,
+      "feasible_assignments": 194880,
+      "total_assignments": 390625
+    },
+    {
+      "channel_index": 4,
+      "reward": -0.35906749963760376,
+      "feasible_assignments": 194880,
+      "total_assignments": 390625
+    },
+    {
+      "channel_index": 5,
+      "reward": -0.3529309034347534,
+      "feasible_assignments": 194880,
+      "total_assignments": 390625
+    },
+    {
+      "channel_index": 6,
+      "reward": -0.3552015423774719,
+      "feasible_assignments": 194880,
+      "total_assignments": 390625
+    },
+    {
+      "channel_index": 7,
+      "reward": -0.3735519051551819,
+      "feasible_assignments": 194880,
+      "total_assignments": 390625
+    }
+  ]
+}

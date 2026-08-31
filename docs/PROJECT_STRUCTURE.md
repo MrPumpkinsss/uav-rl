@@ -16,6 +16,7 @@ src/uav_rl/
 ├── metrics/                   # PPL and evaluation metrics
 ├── models/                    # activation-dropout model hooks
 ├── benchmarks/                # reusable benchmark evaluators
+├── system_baselines/          # EdgeShard-UAV, HexGen-inspired, grouped oracle
 └── rl/                        # shared RL state, PPO, policy I/O, and oracle code
     └── algorithms/            # A2C and masked Double-DQN baselines
 ```
@@ -67,3 +68,20 @@ manifest containing their original path, new path, size, and SHA256.
 - Put superseded source under `legacy/experiments_<period>/<family>/`.
 - Keep experimental alternatives out of the active import path until they pass a
   true-model validation gate.
+
+## Recent LLM baseline package
+
+```text
+src/uav_rl/system_baselines/
+├── edge_shard_uav.py          # subset DP for device choice and contiguous shards
+├── hexgen_search.py           # constrained topology-aware evolutionary search
+└── exact_grouped_oracle.py    # exact enumeration inside a grouped action set
+
+scripts/baselines/
+├── compare_system_baselines.py
+├── evaluate_frozen_system_baselines_true.py
+└── run_exact_grouped_oracle.py
+```
+
+Algorithm definitions and reporting qualifications are fixed in
+`docs/RECENT_LLM_BASELINES.md`.

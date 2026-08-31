@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+from uav_rl.system_baselines import edge_shard_uav_baseline, hexgen_inspired_search_baseline
 from uav_rl.resource_baselines import (
     jointdnn_multi_uav_baseline,
     neurosurgeon_best_split_baseline,
@@ -35,6 +36,8 @@ from uav_rl.surrogate import load_surrogate
 
 METHOD_LABELS = {
     "ppo_deterministic": "Proposed PPO",
+    "edge_shard_uav": "EdgeShard-UAV",
+    "hexgen_inspired": "HexGen-inspired",
     "jointdnn_multi_uav": "JointDNN-MUAV",
     "pipeedge_uav_latency": "PipeEdge-UAV",
     "petals_balanced": "Petals-balanced",
@@ -70,6 +73,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--channels", type=int, default=64)
     parser.add_argument("--channel-seed", type=int, default=20260910)
+    parser.add_argument("--edge-shard-plans-per-state", type=int, default=8)
+    parser.add_argument("--hexgen-population", type=int, default=48)
+    parser.add_argument("--hexgen-generations", type=int, default=48)
     parser.add_argument("--jointdnn-time-limit", type=float, default=1.0)
     parser.add_argument("--annealing-steps", type=int, default=1024)
     parser.add_argument("--random-seed", type=int, default=20260911)
@@ -114,7 +120,7 @@ def _metrics(
 def _write_report(output: Path, payload: dict) -> None:
     rows = payload["methods"]
     lines = [
-        "# Authoritative system-baseline comparison",
+        "# Frozen surrogate system-baseline comparison",
         "",
         "## Status",
         "",
@@ -128,6 +134,9 @@ def _write_report(output: Path, payload: dict) -> None:
         f"- Channel seed: `{payload['channel_seed']}`",
         f"- PPO checkpoint: `{payload['checkpoint']}`",
         f"- Frozen surrogate: `{payload['surrogate']}`",
+        f"- EdgeShard plans retained per DP state: `{payload['edge_shard_plans_per_state']}`",
+        f"- HexGen-inspired search: population `{payload['hexgen_population']}`, "
+        f"generations `{payload['hexgen_generations']}` per channel",
         f"- JointDNN MILP time limit: `{payload['jointdnn_time_limit_seconds']}` seconds/channel",
         f"- Simulated-annealing steps: `{payload['annealing_steps']}` per channel",
         "",
@@ -152,7 +161,8 @@ def _write_report(output: Path, payload: dict) -> None:
             "",
             "## Interpretation boundary",
             "",
-            "JointDNN-MUAV, PipeEdge-UAV, Petals-balanced and Neurosurgeon-inspired are explicit "
+            "EdgeShard-UAV, HexGen-inspired, JointDNN-MUAV, PipeEdge-UAV, Petals-balanced "
+            "and Neurosurgeon-inspired are explicit "
             "multi-UAV adaptations of prior system principles, not byte-for-byte reproductions of "
             "their original device/cloud implementations. Method names and paper text must retain "
             "the `-style` or `-inspired` qualification where appropriate.",
@@ -193,7 +203,14 @@ def _plot(output: Path, payload: dict) -> None:
 
 def main() -> None:
     args = parse_args()
-    if args.channels < 2 or args.annealing_steps < 1 or args.jointdnn_time_limit <= 0.0:
+    if (
+        args.channels < 2
+        or args.annealing_steps < 1
+        or args.edge_shard_plans_per_state < 1
+        or args.hexgen_population < 4
+        or args.hexgen_generations < 1
+        or args.jointdnn_time_limit <= 0.0
+    ):
         raise ValueError("channel count and baseline budgets must be positive")
     if args.output_dir.exists() and any(args.output_dir.iterdir()) and not args.allow_overwrite:
         raise FileExistsError("output directory is not empty; pass --allow-overwrite explicitly")
@@ -213,6 +230,17 @@ def main() -> None:
 
     generators: dict[str, Callable[[], np.ndarray]] = {
         "ppo_deterministic": lambda: policy.deployments(channels, deterministic=True),
+        "edge_shard_uav": lambda: edge_shard_uav_baseline(
+            channels, resource_config, plans_per_state=args.edge_shard_plans_per_state
+        ),
+        "hexgen_inspired": lambda: hexgen_inspired_search_baseline(
+            channels,
+            resource_config,
+            environment,
+            population_size=args.hexgen_population,
+            generations=args.hexgen_generations,
+            seed=args.random_seed + 2,
+        ),
         "jointdnn_multi_uav": lambda: jointdnn_multi_uav_baseline(
             channels,
             resource_config,
@@ -293,6 +321,9 @@ def main() -> None:
         "latency_reference_seconds": latency_reference,
         "channels": args.channels,
         "channel_seed": args.channel_seed,
+        "edge_shard_plans_per_state": args.edge_shard_plans_per_state,
+        "hexgen_population": args.hexgen_population,
+        "hexgen_generations": args.hexgen_generations,
         "jointdnn_time_limit_seconds": args.jointdnn_time_limit,
         "annealing_steps": args.annealing_steps,
         "random_seed": args.random_seed,

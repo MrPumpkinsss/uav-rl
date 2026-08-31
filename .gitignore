@@ -11,3 +11,4 @@ htmlcov/
 .vscode/
 artifacts/
 checkpoints/
+.pytest_tmp*/
