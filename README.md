@@ -224,107 +224,97 @@ latency 越低越好
 
 ## 4. 方法与 baseline
 
+本项目把方法分成两组。**主实验**比较不同的模型部署策略；**RL 消融**只比较几种简单 RL 算法。所有方法最后都输出同一种 32 层 deployment，并使用同一个 resource checker、latency model 和 quality evaluator，因此可以直接比较。
+
 ### 4.1 PPO deterministic（本文在线策略）
 
-PPO 将 32 层逐层分配到 UAV。每一步观察：
+PPO 是本文的在线部署方法。它按照 layer 顺序逐层决定下一层放在哪台 UAV，决策时会同时看到当前信道、各 UAV 的剩余资源和上一层所在的 UAV。训练阶段使用 surrogate reward，部署阶段使用 deterministic argmax，因此在线只需要一次 policy forward，不需要针对每个新信道重新运行搜索。
 
-- 当前 layer；
-- channel 特征；
-- 各 UAV 剩余 memory/energy；
-- previous UAV；
-- 已产生 boundary 信息；
-- 当前资源可行动作 mask。
+代码位于：
 
-部署时使用逐层 deterministic argmax。PPO 的主要系统优势是将大量离线训练成本转化为较低的在线决策成本。
+```text
+src/uav_rl/rl/
+scripts/ppo/train_layerwise_topk.py
+```
 
-当前 `max_policy_boundaries = 4` 是 **boundary freeze threshold**，不是绝对硬上限：达到阈值后，只要当前 UAV 仍资源可行，就强制继续使用当前 UAV；若当前 UAV 已不可行，仍允许切换。实验必须报告实际 boundary count 和 threshold-exceedance fraction。
+PPO 的重点不是证明它是最强的 RL 算法，而是学习一个可以快速响应信道变化的 deployment policy。`max_policy_boundaries = 4` 是 **boundary freeze threshold**：达到阈值后，只要当前 UAV 仍然可行就继续使用它；如果当前 UAV 已经无法继续，策略仍然可以切换到其他 UAV。因此它不是绝对的 boundary 数量上限。
 
-### 4.2 EdgeShard-UAV
+### 4.2 EdgeShard-UAV：连续分片方法
 
-实现：
+EdgeShard-UAV 是 EdgeShard 设备选择和连续分片思想在 UAV 场景下的适配版本。它把 32 层切成若干连续 block，然后选择 UAV 的使用顺序。它主要优化解析的计算和通信时延，不使用 PPL surrogate，因此代表“只根据系统状态做快速分片”的方法。
+
+实现文件：
 
 ```text
 src/uav_rl/system_baselines/edge_shard_uav.py
 ```
 
-它是 EdgeShard 设备选择与连续分片思想对动态 UAV 网络的适配：
+代码用动态规划枚举可行的 UAV 顺序和 block 边界，并检查内存、计算能耗和通信能耗。由于我们没有复现原 EdgeShard 的完整运行时，所以论文中应称为 **EdgeShard-UAV adaptation**，而不是原方法的完整复现。
 
-- action 为有序、不重复的 UAV pipeline；
-- 每台入选 UAV 承担一个连续 Transformer-layer shard；
-- DP 状态：`(next_layer, used_uav_mask, previous_uav)`；
-- 转移同时选择下一台 UAV 和 shard 结束 layer；
-- 扩展时检查 memory 和 computation energy；
-- 选择目标为解析 computation + communication latency；
-- **不查询 PPL surrogate**；
-- 每个 DP 状态保留 `K` 个候选，terminal plan 再用项目完整共享带宽 latency 和通信能耗公式检查与重排。
+### 4.3 HexGen-inspired：拓扑感知搜索
 
-论文必须称为 **EdgeShard-UAV adaptation**，不能称为原 EdgeShard runtime 的完整复现。
+HexGen-inspired 使用一个简单的进化搜索来寻找 UAV 顺序和连续 layer boundaries。它先用 EdgeShard-UAV 和随机方案生成初始解，然后不断调整边界、交换 UAV 顺序或替换 UAV，并保留 reward 较高的方案。
 
-### 4.3 HexGen-inspired topology-aware search
-
-实现：
+实现文件：
 
 ```text
 src/uav_rl/system_baselines/hexgen_search.py
 ```
 
-它将 HexGen 的异构拓扑部署搜索思想适配到本项目的 pipeline action space：
+它会读取冻结的 surrogate reward，所以比 EdgeShard-UAV 使用了更多质量信息，也会花费更长的搜索时间。这个实现借鉴的是 HexGen 的异构拓扑搜索思想，没有复现其 tensor parallelism、serving runtime 和请求调度，因此统一称为 **HexGen-inspired**。
 
-- chromosome：`ordered unique UAVs + contiguous shard boundaries`；
-- 初始化：EdgeShard-UAV 解 + 随机可行 pipeline；
-- mutation：移动 boundary、交换 UAV 顺序、使用未选 UAV 替换当前 UAV；
-- 每次 mutation 后检查完整 memory/energy constraints；
-- fitness：冻结 surrogate 下的统一 reward；
-- selection：elitist evolutionary search；
-- 每个 channel 独立搜索，固定 population、generations 和 seed。
+### 4.4 Simulated annealing：通用搜索方法
 
-论文必须称为 **HexGen-inspired**。当前代码没有复现原 HexGen 的 tensor parallelism、serving runtime 和请求调度。
+模拟退火从一个可行 deployment 开始，随机修改某一层或一段连续层。如果新方案更好就接受；即使暂时变差，也可能以一定概率接受，从而跳出局部最优。它直接使用 surrogate reward，是质量导向较强的搜索 baseline，但每个 channel 都要单独搜索，决策时间明显高于 PPO。
 
-### 4.4 Simulated annealing
+### 4.5 Petals-balanced：流水线均衡方法
 
-从 proxy beam 解初始化，使用冻结 surrogate reward 搜索任意可行 assignment。每一步对单层或连续 layer run 做 mutation，并以温度相关概率接受暂时更差的解。
+Petals-balanced 把模型切成连续 block，并尽量让各个 pipeline stage 的计算负载均衡。它适合检验一种常见的 LLM 分布式推理思路：如果只追求 pipeline 平衡，而不针对 UAV 信道和质量损失做优化，最终的综合 reward 是否会下降。
 
-它是当前最强的通用 surrogate-assisted 搜索基线之一，但逐 channel 搜索开销明显高于 PPO。
+### 4.6 Neurosurgeon-inspired：经典双设备切分
 
-### 4.5 Petals-balanced
+Neurosurgeon-inspired 只考虑两台 UAV 和一个切分点。它枚举不同切分位置和 UAV 组合，再用解析的质量—时延 proxy 选出最优方案。这个 baseline 简单、容易解释，但表达能力明显低于允许任意 layer assignment 的 PPO。
 
-将 LLM 划分为不重复 UAV 上的连续 block，优先最小化最慢 pipeline stage，再用总时延打破平局。它代表 LLM pipeline balancing 思路，不使用 surrogate 选择 deployment。
+### 4.7 JointDNN-MUAV：数学优化对照
 
-### 4.6 Neurosurgeon-inspired
+JointDNN-MUAV 用 MILP 同时表示 layer placement 和跨 UAV boundary，并加入内存、能量和通信约束。它代表较早的显式数学优化思路。由于 JointDNN 较早，本项目保留它作为历史和附录对照，不再把它作为唯一的核心 baseline。
 
-枚举所有 two-UAV、single-split 连续部署，使用解析质量—时延 proxy 选最优解。它表示经典单切分点方法，不是原 Neurosurgeon 系统逐行复现。
+### 4.8 PipeEdge-UAV：纯时延对照
 
-### 4.7 JointDNN-MUAV
+PipeEdge-UAV 使用动态规划选择 UAV 顺序和连续 block，目标只有计算时延加通信时延。它可以说明一个重要 trade-off：时延最低的 deployment 不一定具有最低的 PPL，也不一定具有最好的综合 reward。
 
-使用 SciPy/HiGHS MILP 联合表示 layer placement 和 boundary transition，目标包含解析计算成本、丢包 proxy 和链路时延，并加入 memory/energy 约束。
+### 4.9 Random feasible：下界
 
-该方法保留用于历史优化类对照，但因 JointDNN 较早，不再作为唯一核心 baseline。
+Random feasible 只随机生成满足资源约束的 deployment，不使用信道质量、surrogate 或 latency 目标。它不是竞争方法，而是 sanity check，用来确认经过优化的 deployment 确实比随机可行方案更好。
 
-### 4.8 PipeEdge-UAV
+### 4.10 方法对比关系
 
-使用动态规划选择不重复 UAV 顺序和连续 block boundaries，目标仅最小化解析 computation + communication latency。它用于展示“纯 latency 优化”在质量—时延联合目标下的局限。
+| 方法 | 主要思想 | 是否使用 surrogate | 主要优点 | 主要局限 |
+| --- | --- | --- | --- | --- |
+| **PPO** | 学习在线 layer placement policy | 训练时使用 | 在线决策快，适应动态信道 | 需要训练，性能依赖泛化 |
+| **EdgeShard-UAV** | DP 选择连续分片 | 否 | 解释简单，时延开销较低 | 只能使用连续且不重复的 UAV block |
+| **HexGen-inspired** | 拓扑感知进化搜索 | 是 | 搜索能力强，能直接优化 reward | 每个 channel 都需要搜索，较慢 |
+| **Simulated annealing** | 随机邻域搜索 | 是 | 容易跳出局部最优 | 在线成本很高 |
+| **Petals-balanced** | 平衡 pipeline stage | 否 | 代表 LLM pipeline 思路 | 不直接优化质量损失 |
+| **Neurosurgeon-inspired** | 双 UAV 单切分 | 否 | 简洁、可解释 | 搜索空间过于受限 |
+| **JointDNN-MUAV** | MILP 显式优化 | 否 | 约束表达清楚 | 优化较早且逐 channel 求解较慢 |
+| **PipeEdge-UAV** | DP 最小化 latency | 否 | 能体现时延下界 | 忽略质量目标 |
+| **Random feasible** | 随机可行部署 | 否 | 提供性能下界 | 不进行优化 |
 
-### 4.9 Random feasible
+### 4.11 RL 算法消融
 
-随机采样资源可行 assignment，不使用 channel quality、surrogate 或 latency objective。它是 sanity-check 下界。
-
-### 4.10 RL 算法消融
-
-RL 消融与系统 baseline 分开报告：
+RL 消融只比较：
 
 ```text
-PPO
-A2C
-Masked Double-DQN
+PPO、A2C、Masked Double-DQN
 ```
 
-三者使用相同的状态、动作空间、资源 mask、channel seeds、训练 episode、surrogate reward 和 held-out channels。生产 PPO checkpoint 不得混入从零训练的受控 RL 表。
+三者使用相同的状态、动作空间、资源 mask、训练预算、channel seeds、surrogate reward 和 held-out channels。生产环境中使用的 PPO checkpoint 不放进从零训练的公平 RL 对照表中。
 
-详细协议：
+RL baseline 的详细协议见：
 
 ```text
 docs/RL_BASELINE_PROTOCOL.md
-docs/RECENT_LLM_BASELINES.md
 ```
 
 ---
