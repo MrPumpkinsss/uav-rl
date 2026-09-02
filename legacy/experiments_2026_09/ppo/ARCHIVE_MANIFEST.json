@@ -1,0 +1,36 @@
+{
+  "archive_date": "2026-09-02",
+  "reason": "superseded active command surface",
+  "files": [
+    {
+      "original_path": "scripts/ppo/train_segment.py",
+      "archived_path": "legacy/experiments_2026_09/ppo/train_segment.py",
+      "size_bytes": 8917,
+      "sha256": "eff134a74f2750139a4e6d1659d5fb4885f7bb5a16aca620b57a69569b6a7e42"
+    },
+    {
+      "original_path": "scripts/ppo/train_surrogate.py",
+      "archived_path": "legacy/experiments_2026_09/ppo/train_surrogate.py",
+      "size_bytes": 10086,
+      "sha256": "2adb177de414c95d8898a49dd2603a1e010d701552fbfa4f86491f8d909dcfae"
+    },
+    {
+      "original_path": "scripts/ppo/compare_true_baselines.py",
+      "archived_path": "legacy/experiments_2026_09/ppo/compare_true_baselines.py",
+      "size_bytes": 5809,
+      "sha256": "0e384998c408b3b09976288d63ad5ebe6ba37fd9e373eee2c4ce461646f776fc"
+    },
+    {
+      "original_path": "scripts/ppo/compare_general_assignment_baselines.py",
+      "archived_path": "legacy/experiments_2026_09/ppo/compare_general_assignment_baselines.py",
+      "size_bytes": 13284,
+      "sha256": "83a22169b51ba696017c3c6d242a1a6e5826435e6f81646787aaa52b9f8a2dbe"
+    },
+    {
+      "original_path": "scripts/ppo/diagnose_local_ranking.py",
+      "archived_path": "legacy/experiments_2026_09/ppo/diagnose_local_ranking.py",
+      "size_bytes": 7032,
+      "sha256": "fdcbf236e1397096e5898d4fea7ef0238606809626a4ad63f3dc4c887944bf61"
+    }
+  ]
+}

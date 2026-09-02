@@ -33,8 +33,7 @@ scripts/
 └── maintenance/               # archive/hash and repository maintenance checks
 ```
 
-The canonical current PPO entry point is `scripts/ppo/train.py`. Surrogate
-training commands are research utilities and are not imported by the PPO runtime.
+The canonical current PPO entry point is `scripts/ppo/train_layerwise_topk.py`. Direct true-PPL training remains available at `scripts/ppo/train.py`. Superseded PPO and comparison scripts are archived under `legacy/experiments_2026_09/ppo/`.
 
 ## Generated artifacts
 
@@ -60,8 +59,7 @@ manifest containing their original path, new path, size, and SHA256.
 
 ## Naming rules
 
-- Use descriptive names based on purpose: `train_layerwise_topk.py`,
-  `compare_general_assignment_baselines.py`, and `collect_general_assignment.py`.
+- Use descriptive names based on purpose: `train_layerwise_topk.py`, `compare_system_baselines.py`, and `collect_general_assignment.py`.
 - Keep one active command per purpose; do not create `v2`, `v3`, or date suffixes
   for source files.
 - Put run dates and experiment variants in `artifacts/runs/<family>/<run-name>`.
@@ -85,3 +83,14 @@ scripts/baselines/
 
 Algorithm definitions and reporting qualifications are fixed in
 `docs/RECENT_LLM_BASELINES.md`.
+
+## 2026-09 archive
+
+```text
+legacy/experiments_2026_09/
+├── ppo/   # superseded PPO and comparison scripts
+└── rl/    # superseded contiguous-segment PPO modules and test
+```
+
+Each archive family includes a short README. The PPO archive also includes
+`ARCHIVE_MANIFEST.json` with original paths, archived paths, sizes, and hashes.

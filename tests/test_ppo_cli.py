@@ -23,16 +23,8 @@ def _load_train_script():
     return _load_script("train.py", "ppo_train_cli")
 
 
-def _load_surrogate_train_script():
-    return _load_script("train_surrogate.py", "surrogate_ppo_train_cli")
-
-
 def _load_true_validation_script():
     return _load_script("validate_true_policy.py", "surrogate_ppo_true_validation_cli")
-
-
-def _load_baseline_comparison_script():
-    return _load_script("compare_true_baselines.py", "surrogate_ppo_baseline_compare_cli")
 
 
 def test_run_directory_layout_and_overwrite_protection(tmp_path: Path) -> None:
@@ -69,24 +61,6 @@ def test_resume_requires_the_canonical_state_file(tmp_path: Path) -> None:
 
 
 
-def test_surrogate_run_directory_rejects_overwrite_and_allows_resume(tmp_path: Path) -> None:
-    train_surrogate = _load_surrogate_train_script()
-    run_directory = tmp_path / "surrogate-round"
-    paths = train_surrogate.run_paths(run_directory)
-    args = SimpleNamespace(run_dir=run_directory, resume=False)
-    train_surrogate.prepare_run_directory(args, paths)
-    assert run_directory.is_dir()
-    (run_directory / "marker.txt").write_text("occupied", encoding="utf-8")
-    with pytest.raises(FileExistsError, match="already contains artifacts"):
-        train_surrogate.prepare_run_directory(args, paths)
-
-    resume_args = SimpleNamespace(run_dir=run_directory, resume=True)
-    with pytest.raises(FileNotFoundError, match="resume state"):
-        train_surrogate.prepare_run_directory(resume_args, paths)
-    paths["state"].write_bytes(b"state")
-    train_surrogate.prepare_run_directory(resume_args, paths)
-
-
 def test_true_validation_stages_have_isolated_evidence_and_cache_paths(tmp_path: Path) -> None:
     validate = _load_true_validation_script()
     output, selected, cache = validate._stage_paths(tmp_path, "screening_validation")
@@ -114,13 +88,3 @@ def test_true_validation_can_limit_evaluation_to_frozen_candidates(tmp_path: Pat
     assert validate._requested_candidates(candidate_directory, [second]) == [second.resolve()]
     with pytest.raises(ValueError, match="not frozen"):
         validate._requested_candidates(candidate_directory, [tmp_path / "outside.pth"])
-
-
-def test_baseline_comparison_reuses_one_named_validation_stage(tmp_path: Path) -> None:
-    compare = _load_baseline_comparison_script()
-    validation, output = compare.validation_stage_paths(tmp_path, "confirmation_validation")
-
-    assert validation.name == "confirmation_validation.json"
-    assert output.name == "confirmation_validation_baseline_comparison.json"
-    with pytest.raises(ValueError, match="validation stage"):
-        compare.validation_stage_paths(tmp_path, "confirmation-validation")

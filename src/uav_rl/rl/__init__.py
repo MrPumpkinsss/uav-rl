@@ -4,8 +4,6 @@ from .algorithms import A2CConfig, DQNConfig, LayerwiseA2CTrainer, LayerwiseDQNT
 from .environment import DeploymentEnvironment
 from .policy import ContinuousDeploymentActorCritic
 from .ppo import PPOTrainer
-from .segment_policy import SegmentActorCritic
-from .segment_ppo import SegmentPPOTrainer
 
 __all__ = [
     "A2CConfig",
@@ -15,6 +13,4 @@ __all__ = [
     "LayerwiseA2CTrainer",
     "LayerwiseDQNTrainer",
     "PPOTrainer",
-    "SegmentActorCritic",
-    "SegmentPPOTrainer",
 ]

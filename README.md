@@ -73,6 +73,22 @@ codellama/CodeLlama-7b-hf
 
 因此不能用它选择 deployment 后，直接把结果写成严格匹配的 Llama-2-7B 实验。若最终论文使用 Llama-2-7B，需要重新采集 Llama-2-7B 标签、训练匹配 surrogate、重新冻结所有方法的 deployment，再进行真实模型评估。
 
+### 当前代码入口
+
+新实验只从下面这些 active scripts 开始：
+
+```text
+scripts/ppo/train_layerwise_topk.py              # 当前主 PPO
+scripts/ppo/train.py                             # 真实 CodeLlama PPO 对照
+scripts/ppo/validate_true_policy.py              # 冻结 candidate 的真实验证
+scripts/baselines/compare_system_baselines.py    # 系统 baseline screening
+scripts/baselines/evaluate_frozen_system_baselines_true.py
+scripts/rl/compare_algorithms.py                 # PPO/A2C/DQN 消融
+scripts/surrogate/collect_general_assignment.py  # 采集 surrogate 标签
+scripts/surrogate/train_general_assignment.py   # 训练 general-assignment surrogate
+```
+
+旧的 segment PPO、旧 surrogate PPO 和旧 baseline comparison 已移到 `legacy/experiments_2026_09/`。`legacy/` 只用于历史复现，不属于当前实验入口。
 ### 当前主实验方法
 
 论文系统主表优先使用：
@@ -739,7 +755,7 @@ uav-rl/
 │   ├── data/
 │   ├── models/
 │   └── runs/
-└── legacy/
+└── legacy/                 # read-only superseded code and manifests
 ```
 
 设计原则：

@@ -10,23 +10,18 @@ $env:PYTHONPATH = "src"
 
 | Script | Purpose |
 | --- | --- |
-| `baselines/compare_system_baselines.py` | Freeze and compare PPO, JointDNN-MUAV, PipeEdge-UAV, Petals-balanced, Neurosurgeon-inspired, simulated annealing, and random feasible deployments with the common surrogate. |
+| `baselines/compare_system_baselines.py` | Freeze and compare the current PPO and system baselines, including LinguaLinked-UAV, EdgeShard-UAV and HexGen-inspired, with the common surrogate. |
 | `baselines/evaluate_frozen_system_baselines_true.py` | Evaluate those exact frozen deployments with the matching true LLM and shared noise seeds. |
 
 ## PPO
 
 | Script | Purpose |
 | --- | --- |
-| `ppo/train.py` | Train or resume PPO with the configured quality backend. |
+| `ppo/train.py` | Train or resume PPO directly with the true CodeLlama PPL backend. |
 | `ppo/train_layerwise_topk.py` | Train the current arbitrary layer-to-UAV PPO and export original Top-K candidates. |
-| `ppo/train_segment.py` | Train the older contiguous-segment policy family. |
-| `ppo/train_surrogate.py` | Train PPO with a frozen surrogate reward and export frozen candidates. |
 | `ppo/validate_true_policy.py` | Select frozen candidates using independent true CodeLlama PPL. |
-| `ppo/compare_true_baselines.py` | Compare a selected policy with standard baselines on consumed validation evidence. |
-| `ppo/compare_general_assignment_baselines.py` | Run the resource-aware common-seed baseline comparison. |
-| `ppo/diagnose_local_ranking.py` | Diagnose local surrogate ranking around Strong-link actions. |
 
-The Diverse Top-K experiment is archived and is not a current PPO entry point.
+The older segment/surrogate PPO scripts and the previous baseline-comparison scripts are archived under `legacy/experiments_2026_09/ppo/`. The current PPO entry point is `ppo/train_layerwise_topk.py`; direct true-PPL training is `ppo/train.py`.
 
 ## RL algorithm baselines
 
