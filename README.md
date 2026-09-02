@@ -437,6 +437,8 @@ invalid_fraction = 0
 
 这一节的表格是同一批 64 个 channel 上的 **surrogate screening**。`PPO surrogate-selected Top-1` 已经纳入冻结 deployment；`PPO Top-5 true oracle` 不放进这个 surrogate reward 表，而是由下一步 true-LLM evaluator 在 `ppo_topk_candidates.npz` 中逐候选评估后加入真实结果。
 
+需要特别注意模型链：当前冻结 surrogate 是基于 CodeLlama-7B 数据训练的，而本次真实复验如果使用本地 Llama-2-7B，只能作为跨模型的探索性复验，不能作为严格的同模型最终证据。要形成论文主结果，应重新用 Llama-2-7B 采集 `PPL_clean/PPL_noisy` 标签、训练 Llama-2-7B surrogate，并重新冻结所有方法。
+
 ### 5.3 结果解释
 
 1. **PPO surrogate-selected Top-1 在这组 64-channel surrogate screening 中优于 deterministic PPO。** paired difference 为 `+0.010515`，95% CI 为 `[+0.001859, +0.019172]`。但它的在线 selector 需要生成并评估 20 个候选，决策时间约为 deterministic PPO 的 `22.2×`，因此不能直接替代低延迟主策略。
