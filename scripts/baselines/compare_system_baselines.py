@@ -39,7 +39,7 @@ from uav_rl.surrogate import load_surrogate
 
 METHOD_LABELS = {
     "ppo_deterministic": "PPO deterministic",
-    "ppo_surrogate_top1": "PPO surrogate-selected Top-1",
+    "ppo_surrogate_top1": "PPO surrogate-selected",
     "edge_shard_uav": "EdgeShard-UAV",
     "hexgen_inspired": "HexGen-inspired",
     "lingualinked_uav": "LinguaLinked-UAV",
@@ -50,6 +50,13 @@ METHOD_LABELS = {
     "simulated_annealing": "Simulated annealing",
     "random_feasible": "Random feasible",
 }
+
+
+def _method_label(name: str, candidate_samples: int) -> str:
+    """返回报告显示名；候选数量来自本次运行参数，避免硬编码为 20。"""
+    if name == "ppo_surrogate_top1":
+        return f"PPO surrogate-selected（{candidate_samples} 选 1）"
+    return METHOD_LABELS[name]
 
 
 def parse_args() -> argparse.Namespace:
@@ -159,7 +166,7 @@ def _write_report(output: Path, payload: dict) -> None:
     for name in payload["method_order"]:
         row = rows[name]
         lines.append(
-            f"| {METHOD_LABELS[name]} | {row['reward_mean']:.6f} | "
+            f"| {_method_label(name, payload['ppo_candidate_samples'])} | {row['reward_mean']:.6f} | "
             f"{row['paired_reward_difference_vs_ppo_mean']:+.6f} "
             f"[{row['paired_reward_difference_ci95_low']:+.6f}, "
             f"{row['paired_reward_difference_ci95_high']:+.6f}] | "
@@ -185,7 +192,7 @@ def _write_report(output: Path, payload: dict) -> None:
 
 def _plot(output: Path, payload: dict) -> None:
     names = [name for name in payload["method_order"] if name != "random_feasible"]
-    labels = [METHOD_LABELS[name] for name in names]
+    labels = [_method_label(name, payload["ppo_candidate_samples"]) for name in names]
     rewards = [payload["methods"][name]["reward_mean"] for name in names]
     quality = [payload["methods"][name]["log_ppl_ratio_mean"] for name in names]
     latency = [payload["methods"][name]["latency_mean_seconds"] for name in names]
