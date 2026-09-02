@@ -165,21 +165,27 @@ PPL = exp(NLL)
 
 这里必须先对所有有效 token 聚合 NLL，再取一次指数，不能直接平均每个 batch 或每个文本的 PPL，否则不同序列长度会产生偏差。
 
-### 质量损失目标
+### Clean PPL 和质量损失目标
 
-项目不直接回归绝对 PPL，而是使用：
+这里的 `PPL_clean` 是模型在**没有跨 UAV activation noise 或 packet-drop 干扰**时的基准困惑度。它使用同一个语言模型、同一批文本、同一套 tokenizer、相同的有效 token mask 和相同的 PPL 计算方式，但关闭 deployment 引入的 activation corruption。换句话说，`PPL_clean` 表示模型在理想无噪声条件下本来能达到的质量。
+
+`PPL_noisy` 则是在给定 deployment 和 channel 后，根据 boundary drop vector 注入 activation noise，再对同一批文本计算得到的困惑度。两者的区别只应来自跨 UAV 传输造成的扰动，而不是数据、模型或 token 数量不同。
+
+项目不直接回归绝对 PPL，而是使用相对质量退化：
 
 ```text
 log_ppl_ratio = log(PPL_noisy / PPL_clean)
 ```
 
-优点：
+例如：
 
-- 消除 clean model 基础 PPL 的尺度影响；
-- 0 表示没有质量退化；
-- 正值越大表示 activation noise 导致的质量损失越严重；
-- 对 surrogate 回归通常比直接拟合 PPL 更稳定。
+```text
+PPL_clean = 10
+PPL_noisy = 12
+log_ppl_ratio = log(12 / 10) ≈ 0.182
+```
 
+因此，`log_ppl_ratio = 0` 表示没有额外质量损失；它为正且越大，表示 activation noise 造成的退化越严重。使用这个比值还有两个好处：不同文本或模型的 clean PPL 尺度被消除了，而且对 surrogate 来说通常比直接拟合绝对 PPL 更稳定。
 ### Latency
 
 总时延由解析模型直接计算：
