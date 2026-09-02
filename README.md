@@ -281,6 +281,8 @@ candidate_policies/
 
 ### 4.3 EdgeShard-UAV：连续分片方法
 
+论文：[EdgeShard: Efficient LLM Inference via Collaborative Edge Computing](https://arxiv.org/abs/2405.14371)
+
 EdgeShard-UAV 是 EdgeShard 设备选择和连续分片思想在 UAV 场景下的适配版本。它把 32 层切成若干连续 block，然后选择 UAV 的使用顺序。它主要优化解析的计算和通信时延，不使用 PPL surrogate，因此代表“只根据系统状态做快速分片”的方法。
 
 实现文件：
@@ -292,6 +294,8 @@ src/uav_rl/system_baselines/edge_shard_uav.py
 代码用动态规划枚举可行的 UAV 顺序和 block 边界，并检查内存、计算能耗和通信能耗。由于我们没有复现原 EdgeShard 的完整运行时，所以论文中应称为 **EdgeShard-UAV adaptation**，而不是原方法的完整复现。
 
 ### 4.4 LinguaLinked-UAV：能力感知的移动设备流水线
+
+论文：[LinguaLinked: Distributed Large Language Model Inference on Mobile Devices](https://aclanthology.org/2024.acl-demos.16/)
 
 LinguaLinked-UAV 借鉴移动设备协同 LLM 推理中的“按设备能力分配模型、再根据通信条件组织流水线”的思路。代码先根据 UAV 的计算速度、内存和剩余能量估计每台 UAV 应承担的 layer 数，再枚举可行的 UAV 顺序和连续 block，最后选择通信时延最低的方案。它不使用 PPL surrogate，因此可以作为不依赖学习质量模型的移动设备协同 baseline。
 
@@ -305,6 +309,8 @@ src/uav_rl/system_baselines/lingualinked_uav.py
 
 ### 4.5 HexGen-inspired：拓扑感知搜索
 
+论文：[HexGen: Generative Inference of Large Language Model over Heterogeneous Environment](https://proceedings.mlr.press/v235/jiang24f.html)
+
 HexGen-inspired 使用一个简单的进化搜索来寻找 UAV 顺序和连续 layer boundaries。它先用 EdgeShard-UAV 和随机方案生成初始解，然后不断调整边界、交换 UAV 顺序或替换 UAV，并保留 reward 较高的方案。
 
 实现文件：
@@ -317,21 +323,31 @@ src/uav_rl/system_baselines/hexgen_search.py
 
 ### 4.6 Simulated annealing：通用搜索方法
 
+经典论文：[Optimization by Simulated Annealing](https://doi.org/10.1126/science.220.4598.671)
+
 模拟退火从一个可行 deployment 开始，随机修改某一层或一段连续层。如果新方案更好就接受；即使暂时变差，也可能以一定概率接受，从而跳出局部最优。它直接使用 surrogate reward，是质量导向较强的搜索 baseline，但每个 channel 都要单独搜索，决策时间明显高于 PPO。
 
 ### 4.7 Petals-balanced：流水线均衡方法
+
+论文：[Petals: Collaborative Inference and Fine-tuning of Large Models](https://aclanthology.org/2023.acl-demo.54/)
 
 Petals-balanced 把模型切成连续 block，并尽量让各个 pipeline stage 的计算负载均衡。它适合检验一种常见的 LLM 分布式推理思路：如果只追求 pipeline 平衡，而不针对 UAV 信道和质量损失做优化，最终的综合 reward 是否会下降。
 
 ### 4.8 Neurosurgeon-inspired：经典双设备切分
 
+论文：[Neurosurgeon: Collaborative Intelligence Between the Cloud and Mobile Edge](https://doi.org/10.1145/3037697.3037698)
+
 Neurosurgeon-inspired 只考虑两台 UAV 和一个切分点。它枚举不同切分位置和 UAV 组合，再用解析的质量—时延 proxy 选出最优方案。这个 baseline 简单、容易解释，但表达能力明显低于允许任意 layer assignment 的 PPO。
 
 ### 4.9 JointDNN-MUAV：数学优化对照
 
+论文：[JointDNN: An Efficient Training and Inference Engine for Intelligent Mobile Cloud Computing Services](https://arxiv.org/abs/1801.08618)
+
 JointDNN-MUAV 用 MILP 同时表示 layer placement 和跨 UAV boundary，并加入内存、能量和通信约束。它代表较早的显式数学优化思路。由于 JointDNN 较早，本项目保留它作为历史和附录对照，不再把它作为唯一的核心 baseline。
 
 ### 4.10 PipeEdge-UAV：纯时延对照
+
+论文：[PipeEdge: Pipeline Parallelism for Large-Scale Model Inference on Heterogeneous Edge Devices](https://doi.org/10.1109/DSD57027.2022.00048)
 
 PipeEdge-UAV 使用动态规划选择 UAV 顺序和连续 block，目标只有计算时延加通信时延。它可以说明一个重要 trade-off：时延最低的 deployment 不一定具有最低的 PPL，也不一定具有最好的综合 reward。
 
@@ -359,7 +375,7 @@ Random feasible 只随机生成满足资源约束的 deployment，不使用信�
 RL 消融只比较：
 
 ```text
-PPO、A2C、Masked Double-DQN
+[PPO](https://arxiv.org/abs/1707.06347)、[A2C / Actor-Critic](https://proceedings.mlr.press/v48/mniha16.html)、[DQN](https://doi.org/10.1038/nature14236)
 ```
 
 三者使用相同的状态、动作空间、资源 mask、训练预算、channel seeds、surrogate reward 和 held-out channels。生产环境中使用的 PPO checkpoint 不放进从零训练的公平 RL 对照表中。
