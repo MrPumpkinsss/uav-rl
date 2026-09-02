@@ -1,10 +1,9 @@
-"""Compare PPO with authoritative heuristic/system baselines on one channel set.
+"""在同一组信道上比较 PPO、Top-K PPO 与系统部署 baseline。
 
-This stage uses the frozen general-assignment surrogate for inexpensive screening.
-It freezes the generated deployments so a later command can evaluate the exact
-same actions with the true LLM.  The main table intentionally emphasizes model
-partitioning and optimization baselines; A2C/DQN belong to the separate RL
-algorithm-ablation pipeline under ``scripts/rl``.
+本脚本只负责便宜、可重复的 surrogate screening：先固定所有方法生成的
+ deployment，再由真实 LLM evaluator 在完全相同的 deployment、channel 和
+ noise seed 上进行复验。这样可以避免真实 PPL 参与 baseline 搜索，保证比较
+过程没有信息泄漏。PPO/A2C/DQN 的纯 RL 算法消融由 ``scripts/rl`` 单独负责。
 """
 
 from __future__ import annotations
@@ -85,18 +84,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--jointdnn-time-limit", type=float, default=1.0)
     parser.add_argument("--annealing-steps", type=int, default=1024)
     parser.add_argument("--random-seed", type=int, default=20260911)
-    parser.add_argument("--top-k", type=int, default=5, help="Number of PPO candidates retained for offline Top-K analysis.")
-    parser.add_argument("--candidate-samples", type=int, default=20, help="Beam candidates considered per channel before Top-K selection.")
+    parser.add_argument("--top-k", type=int, default=5, help="离线 Top-K 分析中保留的 PPO 候选数量。")
+    parser.add_argument("--candidate-samples", type=int, default=20, help="每个信道在 Top-K 排名之前考虑的 beam 候选数量。")
     parser.add_argument("--surrogate-device", default="cuda")
     parser.add_argument("--allow-overwrite", action="store_true")
     return parser.parse_args()
 
 
 def _sha256(path: Path) -> str:
+    """计算文件摘要，用于确认 checkpoint 和 surrogate 没有被替换。"""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _write_json(path: Path, payload: dict) -> None:
+    """以临时文件替换的方式保存 JSON，避免中断时留下不完整结果。"""
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
@@ -107,7 +108,9 @@ def _metrics(
     rewards: np.ndarray,
     details: dict[str, np.ndarray],
 ) -> dict[str, float]:
+    # 相邻层的 UAV 编号发生变化，就代表产生一次跨 UAV activation boundary。
     boundaries = np.count_nonzero(deployments[:, 1:] != deployments[:, :-1], axis=1)
+    # 质量 evaluator 保存的是 log(PPL_noisy / PPL_clean)，报告中同时还原 PPL 比例。
     ppl_ratio = np.exp(details["log_ppl_ratio"].astype(np.float64))
     return {
         "reward_mean": float(rewards.mean()),
@@ -132,11 +135,11 @@ def _write_report(output: Path, payload: dict) -> None:
         "",
         "## Status",
         "",
-        "This is a frozen **surrogate-screening** comparison. The exact deployments and channel "
-        "matrices are saved for a later common-seed true-LLM evaluation; these numbers must not "
-        "be presented as final true-PPL results.",
+        "这是冻结 deployment 的 **surrogate screening**，不是最终的真实 PPL 结果。所有 deployment "
+        "和 channel 矩阵都会保存下来，供后续使用相同 noise seeds 的真实 LLM 复验；在真实复验完成前，"
+        "表中的数值不能写成最终 true-PPL 排名。",
         "",
-        "## Protocol",
+        "## 实验协议",
         "",
         f"- Channels: `{payload['channels']}`",
         f"- Channel seed: `{payload['channel_seed']}`",
@@ -148,7 +151,7 @@ def _write_report(output: Path, payload: dict) -> None:
         f"- JointDNN MILP time limit: `{payload['jointdnn_time_limit_seconds']}` seconds/channel",
         f"- Simulated-annealing steps: `{payload['annealing_steps']}` per channel",
         "",
-        "## Results",
+        "## 结果",
         "",
         "| Method | Reward up | Delta vs PPO [95% CI] | log-PPL ratio down | Latency (s) down | Boundaries | Decision ms/channel |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -167,7 +170,7 @@ def _write_report(output: Path, payload: dict) -> None:
     lines.extend(
         [
             "",
-            "## Interpretation boundary",
+            "## 结果解释边界",
             "",
             "EdgeShard-UAV, HexGen-inspired, JointDNN-MUAV, PipeEdge-UAV, Petals-balanced "
             "and Neurosurgeon-inspired are explicit "
@@ -237,14 +240,18 @@ def main() -> None:
     environment = ResourceDeploymentEnvironment(resource_config, surrogate, latency_reference)
     policy, _ = load_layerwise_policy(checkpoint, environment, policy_device="cpu")
     channels = generate_resource_channels(args.channels, args.channel_seed, resource_config)
+    # Top-K 候选只生成一次，后续真实评估必须复用这些冻结候选，不能重新搜索。
     topk_deployments: np.ndarray | None = None
     topk_surrogate_rewards: np.ndarray | None = None
 
     def generate_surrogate_top1() -> np.ndarray:
+        """生成 PPO 候选集，并返回 surrogate 排名第一的 deployment。"""
         nonlocal topk_deployments, topk_surrogate_rewards
+        # 候选生成只使用 surrogate；真实 PPL 只在冻结候选的后处理阶段使用。
         topk_deployments, topk_surrogate_rewards = policy.top_k_deployments(
             channels, k=args.top_k, samples_per_channel=args.candidate_samples
         )
+        # top_k_deployments 已按 surrogate reward 降序排列，第 0 个就是可部署 Top-1。
         return topk_deployments[:, 0, :]
 
     generators: dict[str, Callable[[], np.ndarray]] = {
@@ -293,9 +300,11 @@ def main() -> None:
     frozen_deployments: dict[str, np.ndarray] = {}
     reward_vectors: dict[str, np.ndarray] = {}
     for name, generate in generators.items():
+        # 只测量 selector/search 的墙钟时间，便于比较不同方法的在线决策开销。
         started = time.perf_counter()
         deployments = generate()
         decision_seconds = time.perf_counter() - started
+        # 所有方法都使用同一个 environment 评估，保证 reward、PPL proxy 和 latency 口径一致。
         rewards, details = environment.evaluate(channels, deployments)
         row = _metrics(deployments, rewards, details)
         row["decision_seconds_total"] = decision_seconds
@@ -314,6 +323,7 @@ def main() -> None:
     ppo_reward = methods["ppo_deterministic"]["reward_mean"]
     ppo_vector = reward_vectors["ppo_deterministic"]
     for name in method_order:
+        # 使用 paired difference，因为每种方法都在同一批 channel 上产生结果。
         difference = reward_vectors[name] - ppo_vector
         standard_error = (
             float(difference.std(ddof=1) / np.sqrt(len(difference)))
@@ -355,6 +365,7 @@ def main() -> None:
         "deployment_archive": str(args.output_dir / "frozen_deployments.npz"),
         "channel_archive": str(args.output_dir / "channels.npy"),
     }
+    # 如果 Top-K generator 没有执行到，立即报错，避免保存缺失候选的伪完整结果。
     if topk_deployments is None or topk_surrogate_rewards is None:
         raise RuntimeError("Top-K candidate generation did not run")
     np.save(args.output_dir / "channels.npy", channels)

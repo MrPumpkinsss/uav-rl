@@ -1,16 +1,9 @@
-"""Train or losslessly resume PPO against true CodeLlama PPL rewards.
+"""使用真实 CodeLlama PPL reward 训练或无损恢复 PPO。
 
-Each run is self-contained under ``--run-dir``:
-
-* ``best_policy.pth``: best validation policy;
-* ``training_state.pth``: complete resumable trainer state;
-* ``ppl_cache.jsonl``: completed true-PPL evaluations;
-* ``run_config.json``: immutable launch record; and
-* ``evaluation.json``: held-out PPO/baseline comparison after training.
-
-``--episodes`` is always the total target, not an additional episode count. For
-example, a 1,000-episode run can be extended to 3,000 episodes by rerunning the
-same command with ``--resume --episodes 3000``.
+每次运行都将 checkpoint、训练状态、真实 PPL cache、启动配置和 held-out
+评估结果保存到同一个 ``--run-dir``，便于复现与审计。``--episodes`` 表示
+目标总 episode 数，而不是本次新增数量；例如已有 1,000 episode 时，使用
+``--resume --episodes 3000`` 会继续训练到总计 3,000 episode。
 """
 
 from __future__ import annotations
@@ -32,20 +25,20 @@ from uav_rl.true_quality import TruePPLQualityEvaluator
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse the reproducible true-PPL PPO training configuration."""
+    """解析真实 PPL PPO 的可复现实验参数。"""
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--run-dir",
         type=Path,
         default=Path("artifacts/runs/ppo/next-round"),
-        help="Directory containing every artifact for this PPO run.",
+        help="保存本次 PPO 所有 checkpoint、cache 和评估结果的目录。",
     )
     parser.add_argument(
         "--episodes",
         type=int,
         default=1000,
-        help="Total episode target; use a larger value with --resume to extend a run.",
+        help="目标总 episode 数；恢复训练时增大该值即可延长训练。",
     )
     parser.add_argument("--rollout-size", type=int, default=128)
     parser.add_argument("--validation-channels", type=int, default=32)
@@ -53,7 +46,7 @@ def parse_args() -> argparse.Namespace:
         "--validation-interval",
         type=int,
         default=4,
-        help="Validate every N rollouts (default: 4, i.e. about every 512 episodes).",
+        help="每 N 个 rollout 做一次 validation；默认 4，约每 512 episode 验证一次。",
     )
     parser.add_argument("--test-channels", type=int, default=64)
     parser.add_argument("--training-noise-samples", type=int, default=4)
@@ -66,7 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset-arrow",
         type=Path,
-        help="Read a cached Hugging Face Arrow split instead of resolving the dataset.",
+        help="读取缓存的 Hugging Face Arrow split，避免重新解析数据集。",
     )
     parser.add_argument("--sample-limit", type=int, default=50)
     parser.add_argument("--max-length", type=int, default=512)
@@ -77,17 +70,17 @@ def parse_args() -> argparse.Namespace:
         default="bfloat16",
     )
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--resume", action="store_true", help="Resume exactly from training_state.pth.")
+    parser.add_argument("--resume", action="store_true", help="从 training_state.pth 精确恢复训练。")
     parser.add_argument(
         "--skip-final-evaluation",
         action="store_true",
-        help="Finish training without the expensive held-out PPO/baseline evaluation.",
+        help="跳过耗时的 held-out PPO/baseline 最终评估。",
     )
     return parser.parse_args()
 
 
 def run_paths(run_directory: Path) -> dict[str, Path]:
-    """Return the canonical artifact layout for one independently resumable run."""
+    """返回一次可独立恢复的标准产物路径布局。"""
 
     return {
         "best_model": run_directory / "best_policy.pth",
@@ -99,7 +92,7 @@ def run_paths(run_directory: Path) -> dict[str, Path]:
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
-    """Atomically write a small human-readable run record."""
+    """以原子替换方式写入可读的实验记录。"""
 
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = path.with_suffix(path.suffix + ".tmp")
@@ -108,7 +101,7 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def prepare_run_directory(args: argparse.Namespace, paths: dict[str, Path]) -> None:
-    """Guard against accidental overwrite while allowing an exact resume."""
+    """防止误覆盖旧实验，同时允许从完整训练状态精确恢复。"""
 
     if args.resume:
         if not paths["state"].is_file():
@@ -126,12 +119,14 @@ def prepare_run_directory(args: argparse.Namespace, paths: dict[str, Path]) -> N
 
 
 def main() -> None:
-    """Run true-PPL PPO and optionally evaluate it on held-out channels and seeds."""
+    """执行真实 PPL PPO 训练，并可在 held-out channel/seed 上完成最终评估。"""
 
     args = parse_args()
+    # episode 数必须为正；其余参数由 PPOConfig 和 evaluator 在后续阶段继续校验。
     if args.episodes < 1:
         raise ValueError("episodes must be positive")
 
+    # 先确定所有产物路径并检查目录，避免训练开始后才发现输出会覆盖旧结果。
     paths = run_paths(args.run_dir)
     prepare_run_directory(args, paths)
     print(
@@ -139,6 +134,7 @@ def main() -> None:
         flush=True,
     )
 
+    # 真实 PPL 训练关闭 teacher/behavior cloning，保证 reward 直接来自当前 deployment 的 LLM 评估。
     system = SystemConfig()
     config = replace(
         PPOConfig(system=system),
@@ -156,6 +152,7 @@ def main() -> None:
         test_noise_samples=args.test_noise_samples,
         test_noise_seed=args.test_noise_seed,
     )
+    # generation 配置与 run_config 一起保存；模型、token 数和 batch size 改变都会影响 PPL。
     generation = replace(
         DataGenerationConfig(),
         model_id=args.model,
@@ -166,6 +163,7 @@ def main() -> None:
         dtype=args.dtype,
     )
     latency_reference = estimate_latency_reference(system, config.seed)
+    # evaluator 内部维护 PPL cache；重复出现的 drop vector/noise seed 不会重复 forward。
     evaluator = TruePPLQualityEvaluator(
         generation,
         device_name=args.device,
@@ -188,6 +186,7 @@ def main() -> None:
         ).tolist(),
     }
 
+    # resume 时保留原始 launch_config，避免把恢复运行误记成一套新的实验协议。
     if not args.resume:
         write_json(
             paths["launch_config"],
@@ -201,6 +200,7 @@ def main() -> None:
             },
         )
 
+    # 这里的计时只覆盖 PPO training，不把后面的 held-out evaluation 混入训练耗时。
     started_at = time.perf_counter()
     history = trainer.train(
         paths["best_model"],

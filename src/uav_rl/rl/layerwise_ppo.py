@@ -1,4 +1,4 @@
-"""PPO trainer for paper-style arbitrary layer-to-UAV assignments."""
+"""面向论文实验的任意 layer-to-UAV assignment PPO 训练器。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from uav_rl.rl.layerwise_policy import (
 
 
 class LayerwisePPOTrainer:
-    """Train an independent autoregressive layer assignment policy."""
+    """训练一个按 layer 顺序自回归决策的部署策略。"""
 
     policy_type = "layerwise_general_assignment"
 
@@ -73,6 +73,7 @@ class LayerwisePPOTrainer:
         deployment = np.zeros(layers, dtype=np.int64)
         speeds = np.asarray(self.resource_config.system.compute_speed, dtype=np.float64)
         for layer_index in range(layers):
+            # 每一步只决定当前 layer 的 UAV；state 同时包含信道、资源余量和上一层 UAV。
             state = layer_state(
                 normalized_channel,
                 layer_index=layer_index,
@@ -87,6 +88,8 @@ class LayerwisePPOTrainer:
                 energy_used=energy_used,
                 config=self.resource_config,
             )
+            # 达到 boundary freeze threshold 后，若上一台 UAV 仍可行，则保持连续部署。
+            # 这不是硬性的 boundary 上限；上一台 UAV 不可行时仍允许切换。
             if previous is not None and boundary_count >= self.max_policy_boundaries and mask[previous]:
                 mask[:] = False
                 mask[previous] = True
@@ -96,6 +99,7 @@ class LayerwisePPOTrainer:
                     torch.from_numpy(mask[None, :]),
                     deterministic=deterministic,
                 )
+            # 先保存 transition，随后才更新资源累计量，避免当前 action 看到未来资源。
             action = int(output.actions.item())
             states.append(state)
             masks.append(mask)
@@ -103,6 +107,7 @@ class LayerwisePPOTrainer:
             log_probs.append(float(output.log_probabilities.item()))
             values.append(float(output.values.item()))
             deployment[layer_index] = action
+            # 相邻 layer 的 UAV 不同时产生一次跨 UAV activation boundary。
             if previous is not None and action != previous:
                 boundary_count += 1
             memory_used[action] += self.resource_config.layer_memory_units[layer_index]
@@ -133,11 +138,14 @@ class LayerwisePPOTrainer:
         normalized = self.environment.normalize_channels(channels)
         candidates = []
         rewards = []
+        # beam_width 至少为 k；默认保留 4k 条 beam，避免搜索空间随层数指数爆炸。
         beam_width = max(k, samples_per_channel or (4 * k))
         speeds = np.asarray(self.resource_config.system.compute_speed, dtype=np.float64)
         for channel, normalized_channel in zip(channels, normalized, strict=True):
+            # beam 依次保存累计 log-prob、资源占用、上一 UAV、boundary 数和部分 deployment。
             beams = [(0.0, np.zeros(self.resource_config.system.num_uavs), np.zeros(self.resource_config.system.num_uavs), None, 0, [])]
             for layer_index in range(self.resource_config.system.num_layers):
+                # 当前层扩展所有 beam，再按 policy log-prob 截断，而不是枚举完整 UAV^layer 空间。
                 expanded = []
                 for logp, memory_used, energy_used, previous, boundary_count, deployment in beams:
                     state = layer_state(normalized_channel, layer_index=layer_index, memory_used=memory_used, energy_used=energy_used, previous_uav=previous, config=self.resource_config)
@@ -148,6 +156,7 @@ class LayerwisePPOTrainer:
                     with torch.no_grad():
                         distribution = self.model._distribution(torch.from_numpy(state[None, :]), torch.from_numpy(mask[None, :]))
                         action_scores = [(int(action), float(distribution.log_prob(torch.tensor([int(action)])).item())) for action in np.flatnonzero(mask)]
+                    # 只扩展当前 policy 最可能的 beam_width 个合法动作。
                     action_scores.sort(key=lambda item: item[1], reverse=True)
                     for action, action_logp in action_scores[:beam_width]:
                         next_memory = memory_used.copy()
@@ -155,14 +164,17 @@ class LayerwisePPOTrainer:
                         next_memory[action] += self.resource_config.layer_memory_units[layer_index]
                         next_energy[action] += self.resource_config.compute_energy_coefficient * speeds[action] ** 2 * self.resource_config.layer_compute_seconds_at_unit_speed[layer_index]
                         expanded.append((logp + action_logp, next_memory, next_energy, action, boundary_count + int(previous is not None and action != previous), deployment + [action]))
+                # 保留累计 log-prob 最高的路径，控制 Top-K 候选生成的计算量。
                 expanded.sort(key=lambda item: item[0], reverse=True)
                 beams = expanded[:beam_width]
+            # 不同 beam 可能得到相同 deployment；去重后再进行 surrogate 评分。
             unique = {}
             for _, _, _, _, _, deployment in beams:
                 array = np.asarray(deployment, dtype=np.int64)
                 unique.setdefault(array.tobytes(), array)
             candidate_array = np.stack(list(unique.values()))
             repeated = np.repeat(channel[None, :, :], len(candidate_array), axis=0)
+            # beam 概率只负责产生候选，最终 Top-K 排名必须使用 surrogate reward。
             values, _ = self.environment.evaluate(repeated, candidate_array)
             order = np.argsort(values)[::-1][:k]
             if len(order) < k:

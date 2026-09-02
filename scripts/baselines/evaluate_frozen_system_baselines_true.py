@@ -1,9 +1,8 @@
-"""True-LLM evaluation of frozen system-baseline deployments.
+"""使用真实因果语言模型评估已经冻结的 deployment。
 
-The surrogate screening command saves every deployment. This command consumes
-those immutable actions and evaluates them on the exact same channels/noise
-seeds with the resident causal LM. It never regenerates or re-optimizes a
-baseline after seeing true PPL.
+本脚本只读取 surrogate screening 保存的 channel、deployment 和 PPO Top-K
+候选，不会在观察真实 PPL 后重新搜索或修改任何方法。这样得到的结果才是
+严格的 frozen-deployment true-LLM evaluation。
 """
 
 from __future__ import annotations
@@ -27,16 +26,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model-id",
         default=DataGenerationConfig().model_id,
-        help="Model id or local directory matching the surrogate data chain.",
+        help="与 surrogate 数据链匹配的模型名称或本地模型目录。",
     )
-    parser.add_argument("--noise-samples", type=int, default=4)
-    parser.add_argument("--noise-start", type=int, default=1_900_000_000)
-    parser.add_argument("--device", default="cuda")
-    parser.add_argument("--allow-overwrite", action="store_true")
+    parser.add_argument("--noise-samples", type=int, default=4, help="每个 deployment 使用的独立噪声种子数量。")
+    parser.add_argument("--noise-start", type=int, default=1_900_000_000, help="噪声种子的起始整数。")
+    parser.add_argument("--device", default="cuda", help="真实 LLM 运行设备，例如 cuda 或 cpu。")
+    parser.add_argument("--allow-overwrite", action="store_true", help="允许覆盖已有真实评估结果。")
     return parser.parse_args()
 
 
 def _write_json(path: Path, payload: dict) -> None:
+    """原子保存评估结果，防止真实模型评估中断时破坏已有 JSON。"""
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
@@ -48,6 +48,7 @@ def _metrics_for_true(
     details: dict[str, np.ndarray],
     evaluator: TruePPLQualityEvaluator,
 ) -> dict[str, float]:
+    # true evaluator 返回相对退化 log(PPL_noisy / PPL_clean)，这里还原绝对 PPL。
     boundaries = np.count_nonzero(deployments[:, 1:] != deployments[:, :-1], axis=1)
     ppl = evaluator.clean_perplexity * np.exp(details["log_ppl_ratio"].astype(np.float64))
     return {
@@ -62,7 +63,9 @@ def _metrics_for_true(
         "boundary_count_mean": float(boundaries.mean()),
     }
 
+
 def main() -> None:
+    """读取冻结的 deployment，并在同一批 channel 上完成真实 LLM 评估。"""
     args = parse_args()
     if args.noise_samples < 1:
         raise ValueError("noise sample count must be positive")
@@ -95,6 +98,7 @@ def main() -> None:
 
     reward_vectors: dict[str, np.ndarray] = {}
     rows: dict[str, dict[str, float]] = {}
+    # 保持 screening 阶段的方法顺序，确保 JSON、CSV 和报告可以逐行对应。
     method_order = list(screening["method_order"])
     for name in method_order:
         method_deployments = deployments[name]
@@ -125,6 +129,8 @@ def main() -> None:
             flush=True,
         )
 
+    # Top-K true oracle 只在冻结候选中取真实 reward 最大者，不是新的在线搜索方法。
+    # 没有候选文件时兼容旧 benchmark，只评估普通冻结 deployment。
     topk_path = args.comparison_dir / "ppo_topk_candidates.npz"
     if topk_path.is_file():
         topk_candidates = np.load(topk_path)["deployments"]
@@ -133,10 +139,12 @@ def main() -> None:
         candidate_count = topk_candidates.shape[1]
         candidate_channels = np.repeat(channels, candidate_count, axis=0)
         candidate_deployments = topk_candidates.reshape(-1, topk_candidates.shape[-1])
+        # 重复 channel 后一次性评估 N*K 个候选，保证每个候选使用相同 noise seeds。
         candidate_rewards, candidate_details = environment.evaluate(
             candidate_channels, candidate_deployments, noise_seeds=noise_seeds
         )
         candidate_rewards = candidate_rewards.reshape(len(channels), candidate_count)
+        # 每个 channel 独立选择真实 reward 最好的候选，不能跨 channel 共享索引。
         oracle_index = np.argmax(candidate_rewards, axis=1)
         oracle_rewards = candidate_rewards[np.arange(len(channels)), oracle_index]
         oracle_deployments = topk_candidates[np.arange(len(channels)), oracle_index]
@@ -152,6 +160,7 @@ def main() -> None:
         reward_vectors["ppo_topk_true_oracle"] = oracle_rewards
         method_order.insert(2, "ppo_topk_true_oracle")
 
+    # 所有方法仍相对同一 PPO deterministic 向量计算 paired difference。
     ppo = reward_vectors["ppo_deterministic"]
     for name in method_order:
         difference = reward_vectors[name] - ppo
