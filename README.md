@@ -88,7 +88,6 @@ scripts/surrogate/collect_general_assignment.py  # 采集 surrogate 标签
 scripts/surrogate/train_general_assignment.py   # 训练 general-assignment surrogate
 ```
 
-旧的 segment PPO、旧 surrogate PPO 和旧 baseline comparison 已移到 `legacy/experiments_2026_09/`。`legacy/` 只用于历史复现，不属于当前实验入口。
 ### 当前主实验方法
 
 论文系统主表优先使用：
