@@ -1,7 +1,7 @@
-"""Train the current surrogate ensemble on the targeted multi-seed labels.
+"""在 targeted multi-seed 标签上训练当前 surrogate ensemble。
 
-This command performs validation-only model selection. It never generates a
-final test and never starts PPO; both remain blocked on the acceptance gate.
+脚本只训练和评估 surrogate，不会启动 PPO。训练完成后应先检查 acceptance
+结果，再把 checkpoint 交给 PPO 训练入口。
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from uav_rl.tail_training import TailValidationCriteria, run_tail_validation_abl
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    # 数据路径、模型配置和输出路径全部显式暴露，确保每次 surrogate 实验可审计。
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--epochs", type=int, default=1500)
     parser.add_argument("--patience", type=int, default=250)
@@ -69,6 +70,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    # 先解析参数，再构建/加载数据；这样 --help 和 plan-only 都不会触发真实模型推理。
     result = run_tail_validation_ablation(
         train_path=args.train,
         validation_path=args.validation,

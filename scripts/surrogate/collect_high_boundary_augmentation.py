@@ -1,4 +1,4 @@
-'''Collect additional high-boundary true-PPL labels for surrogate training only.'''
+'''只为 surrogate 训练采集高 boundary 区域的额外真实 PPL 标签。'''
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ def _sha256(path: Path) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    # 数据路径、模型配置和输出路径全部显式暴露，确保每次 surrogate 实验可审计。
     parser.add_argument('--actions', type=int, default=128)
     parser.add_argument('--noise-samples', type=int, default=8)
     parser.add_argument('--action-seed', type=int, default=20260830)
@@ -82,11 +83,14 @@ def _build_plan(args: argparse.Namespace, config: ResourceConstrainedConfig, gen
 
 def main() -> None:
     args = parse_args()
+    # 先解析参数，再构建/加载数据；这样 --help 和 plan-only 都不会触发真实模型推理。
     if min(args.actions, args.noise_samples, args.progress_interval) < 1:
         raise ValueError('actions, noise samples, and progress interval must be positive')
+    # 增广数据必须沿用原数据集的 generation 配置，避免模型或语料不一致。
     reference = json.loads(args.reference_manifest.read_text(encoding='utf-8'))
     generation = DataGenerationConfig(**reference['generation'])
     config = ResourceConstrainedConfig()
+    # 已有 plan 必须验证 resource config；否则不能把旧计划混入当前数据集。
     if args.plan.exists():
         plan = json.loads(args.plan.read_text(encoding='utf-8'))
         if plan.get('actions') is None or plan.get('resource_config') != config.to_dict():
@@ -102,11 +106,13 @@ def main() -> None:
             if line.strip():
                 row = json.loads(line)
                 completed.add((row['action_id'], int(row['noise_seed'])))
+    # evaluator cache 负责去重相同 drop vector/noise seed，避免重复昂贵的真实 PPL forward。
     evaluator = TruePPLQualityEvaluator(generation, device_name=args.device, cache_path=args.ppl_cache, progress_interval=args.progress_interval)
     if abs(evaluator.clean_perplexity - float(reference['quality_evaluator']['clean_perplexity'])) > 1e-5:
         raise ValueError('clean PPL changed from the reference dataset')
     expected = sum(len(a['noise_seeds']) for a in plan['actions'])
     newly = 0
+    # 逐 action、逐 noise seed 写入 JSONL，进程被中断时只需继续未完成的组合。
     for action in plan['actions']:
         probabilities = np.asarray(action['drop_probabilities'], dtype=np.float32)
         for seed in action['noise_seeds']:

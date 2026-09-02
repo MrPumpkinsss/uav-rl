@@ -1,8 +1,6 @@
-"""Train or resume the targeted tail residual surrogate on frozen validation data.
+"""在冻结 validation 数据上训练或恢复 targeted tail residual surrogate。
 
-The command never loads final-test data and never starts PPO. Its state file is
-written after every epoch, including optimizer and RNG state, so interruption
-can resume the active ensemble member without discarding progress.
+residual 只学习相对于 global surrogate 的修正量，并由 hazard gate 控制修正强度。
 """
 
 from __future__ import annotations
@@ -17,6 +15,7 @@ from uav_rl.tail_training import TailValidationCriteria
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    # 数据路径、模型配置和输出路径全部显式暴露，确保每次 surrogate 实验可审计。
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--epochs", type=int, default=1200)
     parser.add_argument("--patience", type=int, default=200)
@@ -61,6 +60,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    # 先解析参数，再构建/加载数据；这样 --help 和 plan-only 都不会触发真实模型推理。
+    # residual 训练依赖已经冻结的 global checkpoint，不能直接把它当作独立 surrogate 训练。
     result = train_tail_residual_surrogate(
         train_path=args.train,
         validation_path=args.validation,

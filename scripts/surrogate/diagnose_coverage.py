@@ -1,4 +1,4 @@
-"""Diagnose surrogate data coverage without true-PPL calls or model training."""
+"""诊断 surrogate 数据覆盖范围；不会调用真实 PPL，也不会训练模型。"""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from uav_rl.coverage_diagnostics import diagnose_surrogate_coverage
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    # 数据路径、模型配置和输出路径全部显式暴露，确保每次 surrogate 实验可审计。
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--neighbors", type=int, default=8)
     parser.add_argument(
@@ -41,6 +42,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    # 先解析参数，再构建/加载数据；这样 --help 和 plan-only 都不会触发真实模型推理。
     result = diagnose_surrogate_coverage(
         train_path=args.train,
         validation_path=args.validation,

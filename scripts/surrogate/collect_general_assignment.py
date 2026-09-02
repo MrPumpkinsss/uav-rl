@@ -1,8 +1,7 @@
-'''Build or resume the real-PPL dataset for paper-style layer-to-UAV assignment.
+'''本脚本构建或恢复用于论文 layer-to-UAV assignment 的真实 PPL 数据集。
 
-The command never starts PPO. It writes every completed action/noise-seed label
-to JSONL before proceeding, so it can resume after interruption without
-repeating true CodeLlama forwards.
+脚本不会启动 PPO。每个完成的 action/noise-seed 标签都会先写入 JSONL，
+因此即使中断，也可以从 cache 恢复而不重复执行真实 CodeLlama forward。
 '''
 
 from __future__ import annotations
@@ -24,6 +23,7 @@ from uav_rl.true_quality import TruePPLQualityEvaluator
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    # 数据路径、模型配置和输出路径全部显式暴露，确保每次 surrogate 实验可审计。
     parser.add_argument('--plan-only', action='store_true')
     parser.add_argument('--device', default='cuda')
     parser.add_argument('--progress-interval', type=int, default=25)
@@ -58,6 +58,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    # 先解析参数，再构建/加载数据；这样 --help 和 plan-only 都不会触发真实模型推理。
+    # reference manifest 定义模型、语料和 clean PPL，必须作为所有 label 的共同基准。
     reference = json.loads(args.reference_manifest.read_text(encoding='utf-8'))
     generation = DataGenerationConfig(**reference['generation'])
     plan = build_general_assignment_plan(
@@ -75,10 +77,12 @@ def main() -> None:
         },
         'true_ppl_forwards': sum(len(action['noise_seeds']) for action in plan['actions']),
     }
+    # plan-only 只生成并检查采样计划，不加载 LLM，便于先审阅预计的计算量。
     if args.plan_only:
         print(json.dumps(summary, indent=2), flush=True)
         return
 
+    # 真正进入标签采集后才加载 LLM；evaluator 自带 JSONL cache，可从中断处恢复。
     evaluator = TruePPLQualityEvaluator(
         generation,
         device_name=args.device,

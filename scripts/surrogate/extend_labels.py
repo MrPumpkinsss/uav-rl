@@ -1,8 +1,6 @@
-"""Extend high-variance surrogate training labels with independent true-PPL seeds.
+"""使用独立真实 PPL noise seed 扩充高方差 surrogate 训练标签。
 
-The current targeted plan raises coverage labels from 4 to 16 seeds and
-tail-disagreement labels from 24 to 48 seeds.  It is train-only: the frozen
-validation data is never sampled, reused, or overwritten.
+脚本只补充缺失的标签，不会启动 PPO；已有 JSONL cache 会被复用。
 """
 
 from __future__ import annotations
@@ -23,6 +21,7 @@ from uav_rl.true_quality import TruePPLQualityEvaluator
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    # 数据路径、模型配置和输出路径全部显式暴露，确保每次 surrogate 实验可审计。
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--progress-interval", type=int, default=50)
@@ -84,6 +83,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    # 先解析参数，再构建/加载数据；这样 --help 和 plan-only 都不会触发真实模型推理。
     plan = build_targeted_seed_plan(
         v2_plan_path=args.v2_plan,
         v3_plan_path=args.v3_plan,

@@ -1,4 +1,4 @@
-"""Training and acceptance evaluation for the multi-seed surrogate ensemble."""
+"""多噪声种子 surrogate ensemble 的训练、评估和准入检查。"""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from uav_rl.surrogate import PPLSurrogate, PPLSurrogateEnsemble
 
 @dataclass(frozen=True)
 class EnsembleTrainingConfig:
-    """Hyperparameters for independently initialized ensemble members."""
+    """多个独立初始化 ensemble member 的训练超参数。"""
 
     seed: int = 20260822
     member_count: int = 5
@@ -54,7 +54,7 @@ class EnsembleTrainingConfig:
 
 @dataclass(frozen=True)
 class SurrogateAcceptanceCriteria:
-    """Thresholds that gate downstream PPO training."""
+    """决定 surrogate 是否允许进入后续 PPO 训练的质量阈值。"""
 
     maximum_mae: float = 0.08
     minimum_spearman: float = 0.90
@@ -87,10 +87,11 @@ def _verify_dataset_manifest(
     manifest: dict[str, Any],
     split_paths: dict[str, Path],
 ) -> None:
-    """Reject training if split integrity or leakage-gate evidence is missing."""
+    """当数据划分完整性或 leakage audit 证据缺失时拒绝训练。"""
 
     if manifest.get("format_version") not in {2, 3}:
         raise ValueError("surrogate training requires dataset manifest format version 2 or 3")
+    # 先检查 isolation audit，再检查 split SHA256，防止数据泄漏或文件被替换。
     if not manifest.get("isolation_audit", {}).get("passed", False):
         raise ValueError("dataset isolation audit is missing or failed")
     manifest_splits = manifest.get("splits", {})
@@ -103,7 +104,7 @@ def _verify_dataset_manifest(
 
 
 def _rankdata(values: np.ndarray) -> np.ndarray:
-    """Assign one-based average ranks, including deterministic tie handling."""
+    """计算从 1 开始的平均 rank，并确定性处理相同值。"""
 
     values = np.asarray(values, dtype=np.float64)
     order = np.argsort(values, kind="mergesort")
@@ -127,12 +128,13 @@ def _correlation(left: np.ndarray, right: np.ndarray) -> float:
 
 
 def regression_metrics(target: np.ndarray, prediction: np.ndarray) -> dict[str, float]:
-    """Compute regression and absolute-error summary metrics."""
+    """计算回归误差和绝对误差汇总指标。"""
 
     target = np.asarray(target, dtype=np.float64)
     prediction = np.asarray(prediction, dtype=np.float64)
     if target.shape != prediction.shape or target.size == 0:
         raise ValueError("target and prediction must have the same non-empty shape")
+    # 所有误差都在 log-PPL ratio 空间计算，与 surrogate 训练目标保持一致。
     residual = prediction - target
     absolute = np.abs(residual)
     centered = float(np.sum((target - target.mean()) ** 2))
@@ -275,12 +277,13 @@ def evaluate_predictions(
 def assess_acceptance(
     metrics: dict[str, Any], criteria: SurrogateAcceptanceCriteria
 ) -> dict[str, Any]:
-    """Return individual checks and the aggregate acceptance decision."""
+    """返回各项准入检查及最终 aggregate decision。"""
 
     source_maes = {
         source: float(values["mae"]) for source, values in metrics["per_source"].items()
     }
     regret = metrics["grouped_reward_regret"]
+    # 只有所有 gate 都通过，checkpoint 才允许用于 PPO reward。
     checks = {
         "test_mae": metrics["mae"] <= criteria.maximum_mae,
         "test_spearman": metrics["spearman"] >= criteria.minimum_spearman,
@@ -310,7 +313,7 @@ def _set_seed(seed: int) -> None:
 
 
 def _source_family(source: str) -> str:
-    """Group tail subtypes while retaining the original source families."""
+    """将 tail 子类型归并为统一 tail family，同时保留其他 source family。"""
 
     return "tail" if source == "tail" or source.startswith("tail_") else source
 
@@ -318,10 +321,11 @@ def _source_family(source: str) -> str:
 def _sample_weights(
     split: dict[str, np.ndarray], config: EnsembleTrainingConfig
 ) -> np.ndarray:
-    """Build stable source/label-noise weights without changing the target values."""
+    """构造 source/label-noise 权重，但不改变监督目标值。"""
 
     count = int(split["log_ppl_ratio"].size)
     weights = np.ones(count, dtype=np.float64)
+    # source balancing 只调整 loss 权重，不改变样本标签。
     if config.source_balancing:
         families = np.asarray(
             [_source_family(str(source)) for source in split["sample_source"]]
@@ -332,6 +336,7 @@ def _sample_weights(
             weights[index] *= count / (
                 len(unique) * float(count_by_family[str(family)])
             )
+    # 高方差标签降低权重，避免少量噪声较大的 true-PPL 样本主导训练。
     if config.variance_weighting:
         if "log_ppl_ratio_std" not in split or "noise_seed_count" not in split:
             raise ValueError("variance weighting requires label std and seed counts")
@@ -341,6 +346,7 @@ def _sample_weights(
         precision = 1.0 / (mean_variance + config.variance_floor**2)
         precision /= max(float(precision.mean()), 1e-12)
         weights *= np.clip(precision, 1.0 / config.maximum_sample_weight, config.maximum_sample_weight)
+    # 归一化到平均权重 1，保持不同 weighting 配置下 loss 量级可比。
     weights /= max(float(weights.mean()), 1e-12)
     return weights.astype(np.float32)
 
