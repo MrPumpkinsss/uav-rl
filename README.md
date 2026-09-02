@@ -373,7 +373,7 @@ docs/RL_BASELINE_PROTOCOL.md
 
 ---
 
-## 5. 2026-09-01 系统方法 benchmark
+## 5. 2026-09-02 系统方法 benchmark（含 PPO Top-K）
 
 ### 5.1 实验协议
 
@@ -381,7 +381,7 @@ docs/RL_BASELINE_PROTOCOL.md
 
 ```text
 artifacts/runs/system_baseline_comparison/
-└── llm_system_baselines_with_lingualinked_64ch_2026-09-01/
+└── with_ppo_topk_64ch_2026-09-02/
     ├── channels.npy
     ├── frozen_deployments.npz
     ├── comparison_summary.json
@@ -395,7 +395,9 @@ artifacts/runs/system_baseline_comparison/
 ```text
 channels                     = 64
 channel seed                 = 20260910
-PPO mode                     = deterministic
+PPO deterministic             = one policy forward
+PPO surrogate Top-1           = Top-K=5, candidate-samples=20
+PPO true Top-5 oracle         = evaluated later from frozen candidates
 EdgeShard plans/state       = 8
 LinguaLinked-UAV            = capability-balanced contiguous pipeline
 HexGen-inspired population  = 48
@@ -415,8 +417,9 @@ GPU                          = NVIDIA GeForce RTX 5070 Ti
 
 | 方法 | Reward ↑ | 相对 PPO 差值 `[95% CI]` | log-PPL ratio ↓ | Latency (s) ↓ | Boundaries | 决策 ms/channel ↓ |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| **PPO deterministic** | -0.383815 | 0 | 0.207401 | 0.735128 | 2.062 | **10.71** |
-| **HexGen-inspired** | **-0.372926** | +0.010890 `[-0.004879, 0.026658]` | 0.204905 | 0.709825 | 2.000 | 820.83 |
+| **PPO deterministic** | -0.383815 | 0 | 0.207401 | 0.735128 | 2.062 | **8.26** |
+| **PPO surrogate-selected Top-1** | **-0.373300** | +0.010515 `[+0.001859, +0.019172]` | **0.197015** | 0.721161 | 2.016 | 183.76 |
+| **HexGen-inspired** | -0.372926 | +0.010890 `[-0.004879, 0.026658]` | 0.204905 | 0.709825 | 2.000 | 794.66 |
 | LinguaLinked-UAV | -0.544335 | -0.160519 `[-0.175725, -0.145314]` | 0.313883 | 1.016668 | 3.000 | 712.56 |
 | Simulated annealing | -0.373881 | +0.009935 `[-0.005966, 0.025835]` | **0.203512** | 0.714160 | 2.000 | 2973.18 |
 | Neurosurgeon-inspired | -0.388179 | -0.004363 `[-0.020974, 0.012247]` | 0.238366 | 0.705948 | 2.000 | 209.05 |
@@ -432,14 +435,17 @@ GPU                          = NVIDIA GeForce RTX 5070 Ti
 invalid_fraction = 0
 ```
 
+这一节的表格是同一批 64 个 channel 上的 **surrogate screening**。`PPO surrogate-selected Top-1` 已经纳入冻结 deployment；`PPO Top-5 true oracle` 不放进这个 surrogate reward 表，而是由下一步 true-LLM evaluator 在 `ppo_topk_candidates.npz` 中逐候选评估后加入真实结果。
+
 ### 5.3 结果解释
 
-1. **HexGen-inspired 的 surrogate mean 最好，但没有与 PPO 显著分离。** 相对 PPO 的 paired difference 为 `+0.010890`，95% CI 跨过 0。因此不能写成 HexGen-inspired 显著优于 PPO，也不能写成 PPO 优于 HexGen-inspired。
-2. **Simulated annealing 同样略高于 PPO，但 CI 跨 0。** 它是另一个有竞争力的 surrogate-assisted offline search。
-3. **PPO 的在线决策最有优势。** HexGen-inspired、EdgeShard-UAV、JointDNN 和 simulated annealing 分别约为 PPO 决策开销的 `74.2×`、`24.8×`、`170.7×` 和 `277.7×`。
-4. **EdgeShard-UAV 取得最低 latency，但质量 proxy 较差。** 它比 PPO 平均低约 `0.0357 s`，同时 log-PPL ratio 从 `0.2074` 增加到 `0.3150`，所以综合 reward 更低。这说明纯 latency-oriented contiguous sharding 不能替代质量感知优化。
-5. **Petals-balanced 不是强 reward optimizer。** 在当前动态 UAV 信道中，它固定形成更多 pipeline boundaries，通信和质量成本较高。
-6. **Random feasible 验证优化的必要性。** 虽然全部可行，但 reward、quality 和 latency 均明显更差。
+1. **PPO surrogate-selected Top-1 在这组 64-channel surrogate screening 中优于 deterministic PPO。** paired difference 为 `+0.010515`，95% CI 为 `[+0.001859, +0.019172]`。但它的在线 selector 需要生成并评估 20 个候选，决策时间约为 deterministic PPO 的 `22.2×`，因此不能直接替代低延迟主策略。
+2. **HexGen-inspired 的 surrogate mean 与 PPO Top-1 接近。** 它相对 deterministic PPO 的差值为 `+0.010890`，95% CI 跨过 0，不能宣称显著优于 PPO。
+3. **Simulated annealing 同样略高于 deterministic PPO，但 CI 跨 0。** 它是另一个有竞争力的 surrogate-assisted offline search。
+4. **PPO deterministic 的在线决策仍然最快的学习型策略。** Top-1、HexGen-inspired、EdgeShard-UAV、JointDNN 和 simulated annealing 分别约为 deterministic PPO 决策开销的 `22.2×`、`96.2×`、`28.1×`、`235.1×` 和 `392.5×`。
+5. **EdgeShard-UAV 取得最低 latency，但质量 proxy 较差。** 它比 PPO 平均低约 `0.0357 s`，同时 log-PPL ratio 从 `0.2074` 增加到 `0.3150`，所以综合 reward 更低。这说明纯 latency-oriented contiguous sharding 不能替代质量感知优化。
+6. **Petals-balanced 不是强 reward optimizer。** 在当前动态 UAV 信道中，它固定形成更多 pipeline boundaries，通信和质量成本较高。
+7. **Random feasible 验证优化的必要性。** 虽然全部可行，但 reward、quality 和 latency 均明显更差。
 
 最准确的当前结论是：
 
@@ -672,7 +678,9 @@ python scripts/baselines/compare_system_baselines.py `
   --annealing-steps 1024 `
   --random-seed 20260911 `
   --surrogate-device cuda `
-  --output-dir artifacts/runs/system_baseline_comparison/llm_system_baselines_with_lingualinked_64ch_2026-09-01
+  --top-k 5 `
+  --candidate-samples 20 `
+  --output-dir artifacts/runs/system_baseline_comparison/with_ppo_topk_64ch_2026-09-02
 ```
 
 输出会冻结 channel 和每个方法的 deployment。
@@ -681,7 +689,7 @@ python scripts/baselines/compare_system_baselines.py `
 
 ```powershell
 python scripts/baselines/evaluate_frozen_system_baselines_true.py `
-  --comparison-dir artifacts/runs/system_baseline_comparison/llm_system_baselines_with_lingualinked_64ch_2026-09-01 `
+  --comparison-dir artifacts/runs/system_baseline_comparison/with_ppo_topk_64ch_2026-09-02 `
   --model-id "<matching local CodeLlama model directory>" `
   --noise-samples 4 `
   --device cuda
@@ -812,7 +820,7 @@ artifacts/runs/surrogate_ppo/
 
 artifacts/runs/system_baseline_comparison/
 ├── authoritative_heuristics_64ch_2026-08-30/
-└── llm_system_baselines_with_lingualinked_64ch_2026-09-01/
+└── with_ppo_topk_64ch_2026-09-02/
 
 artifacts/runs/exact_grouped_oracle/
 └── grouped_8_2026-08-31/

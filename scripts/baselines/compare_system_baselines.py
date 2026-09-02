@@ -39,7 +39,8 @@ from uav_rl.rl.policy_io import load_layerwise_policy, resource_config_from_dict
 from uav_rl.surrogate import load_surrogate
 
 METHOD_LABELS = {
-    "ppo_deterministic": "Proposed PPO",
+    "ppo_deterministic": "PPO deterministic",
+    "ppo_surrogate_top1": "PPO surrogate-selected Top-1",
     "edge_shard_uav": "EdgeShard-UAV",
     "hexgen_inspired": "HexGen-inspired",
     "lingualinked_uav": "LinguaLinked-UAV",
@@ -84,6 +85,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--jointdnn-time-limit", type=float, default=1.0)
     parser.add_argument("--annealing-steps", type=int, default=1024)
     parser.add_argument("--random-seed", type=int, default=20260911)
+    parser.add_argument("--top-k", type=int, default=5, help="Number of PPO candidates retained for offline Top-K analysis.")
+    parser.add_argument("--candidate-samples", type=int, default=20, help="Beam candidates considered per channel before Top-K selection.")
     parser.add_argument("--surrogate-device", default="cuda")
     parser.add_argument("--allow-overwrite", action="store_true")
     return parser.parse_args()
@@ -215,6 +218,8 @@ def main() -> None:
         or args.hexgen_population < 4
         or args.hexgen_generations < 1
         or args.jointdnn_time_limit <= 0.0
+        or args.top_k < 1
+        or args.candidate_samples < args.top_k
     ):
         raise ValueError("channel count and baseline budgets must be positive")
     if args.output_dir.exists() and any(args.output_dir.iterdir()) and not args.allow_overwrite:
@@ -232,9 +237,19 @@ def main() -> None:
     environment = ResourceDeploymentEnvironment(resource_config, surrogate, latency_reference)
     policy, _ = load_layerwise_policy(checkpoint, environment, policy_device="cpu")
     channels = generate_resource_channels(args.channels, args.channel_seed, resource_config)
+    topk_deployments: np.ndarray | None = None
+    topk_surrogate_rewards: np.ndarray | None = None
+
+    def generate_surrogate_top1() -> np.ndarray:
+        nonlocal topk_deployments, topk_surrogate_rewards
+        topk_deployments, topk_surrogate_rewards = policy.top_k_deployments(
+            channels, k=args.top_k, samples_per_channel=args.candidate_samples
+        )
+        return topk_deployments[:, 0, :]
 
     generators: dict[str, Callable[[], np.ndarray]] = {
         "ppo_deterministic": lambda: policy.deployments(channels, deterministic=True),
+        "ppo_surrogate_top1": generate_surrogate_top1,
         "edge_shard_uav": lambda: edge_shard_uav_baseline(
             channels, resource_config, plans_per_state=args.edge_shard_plans_per_state
         ),
@@ -333,13 +348,19 @@ def main() -> None:
         "jointdnn_time_limit_seconds": args.jointdnn_time_limit,
         "annealing_steps": args.annealing_steps,
         "random_seed": args.random_seed,
+        "ppo_top_k": args.top_k,
+        "ppo_candidate_samples": args.candidate_samples,
         "method_order": method_order,
         "methods": methods,
         "deployment_archive": str(args.output_dir / "frozen_deployments.npz"),
         "channel_archive": str(args.output_dir / "channels.npy"),
     }
+    if topk_deployments is None or topk_surrogate_rewards is None:
+        raise RuntimeError("Top-K candidate generation did not run")
     np.save(args.output_dir / "channels.npy", channels)
     np.savez_compressed(args.output_dir / "frozen_deployments.npz", **frozen_deployments)
+    np.savez_compressed(args.output_dir / "ppo_topk_candidates.npz", deployments=topk_deployments.astype(np.int16))
+    np.save(args.output_dir / "ppo_topk_surrogate_rewards.npy", topk_surrogate_rewards)
     _write_json(args.output_dir / "comparison_summary.json", payload)
     with (args.output_dir / "comparison_table.csv").open(
         "w", newline="", encoding="utf-8"

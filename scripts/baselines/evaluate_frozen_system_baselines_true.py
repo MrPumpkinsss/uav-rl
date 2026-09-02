@@ -42,6 +42,26 @@ def _write_json(path: Path, payload: dict) -> None:
     temporary.replace(path)
 
 
+def _metrics_for_true(
+    deployments: np.ndarray,
+    rewards: np.ndarray,
+    details: dict[str, np.ndarray],
+    evaluator: TruePPLQualityEvaluator,
+) -> dict[str, float]:
+    boundaries = np.count_nonzero(deployments[:, 1:] != deployments[:, :-1], axis=1)
+    ppl = evaluator.clean_perplexity * np.exp(details["log_ppl_ratio"].astype(np.float64))
+    return {
+        "reward_mean": float(rewards.mean()),
+        "reward_std": float(rewards.std()),
+        "reward_standard_error": float(rewards.std(ddof=1) / np.sqrt(len(rewards))),
+        "ppl_mean": float(ppl.mean()),
+        "ppl_std": float(ppl.std()),
+        "log_ppl_ratio_mean": float(details["log_ppl_ratio"].mean()),
+        "latency_mean_seconds": float(details["latency_seconds"].mean()),
+        "invalid_fraction": float(details["invalid"].mean()),
+        "boundary_count_mean": float(boundaries.mean()),
+    }
+
 def main() -> None:
     args = parse_args()
     if args.noise_samples < 1:
@@ -75,7 +95,8 @@ def main() -> None:
 
     reward_vectors: dict[str, np.ndarray] = {}
     rows: dict[str, dict[str, float]] = {}
-    for name in screening["method_order"]:
+    method_order = list(screening["method_order"])
+    for name in method_order:
         method_deployments = deployments[name]
         rewards, details = environment.evaluate(
             channels, method_deployments, noise_seeds=noise_seeds
@@ -104,8 +125,35 @@ def main() -> None:
             flush=True,
         )
 
+    topk_path = args.comparison_dir / "ppo_topk_candidates.npz"
+    if topk_path.is_file():
+        topk_candidates = np.load(topk_path)["deployments"]
+        if topk_candidates.shape[0] != len(channels):
+            raise ValueError("Top-K candidate channel count does not match channels.npy")
+        candidate_count = topk_candidates.shape[1]
+        candidate_channels = np.repeat(channels, candidate_count, axis=0)
+        candidate_deployments = topk_candidates.reshape(-1, topk_candidates.shape[-1])
+        candidate_rewards, candidate_details = environment.evaluate(
+            candidate_channels, candidate_deployments, noise_seeds=noise_seeds
+        )
+        candidate_rewards = candidate_rewards.reshape(len(channels), candidate_count)
+        oracle_index = np.argmax(candidate_rewards, axis=1)
+        oracle_rewards = candidate_rewards[np.arange(len(channels)), oracle_index]
+        oracle_deployments = topk_candidates[np.arange(len(channels)), oracle_index]
+        oracle_details = {
+            key: value.reshape(len(channels), candidate_count)[
+                np.arange(len(channels)), oracle_index
+            ]
+            for key, value in candidate_details.items()
+        }
+        rows["ppo_topk_true_oracle"] = _metrics_for_true(
+            oracle_deployments, oracle_rewards, oracle_details, evaluator
+        )
+        reward_vectors["ppo_topk_true_oracle"] = oracle_rewards
+        method_order.insert(2, "ppo_topk_true_oracle")
+
     ppo = reward_vectors["ppo_deterministic"]
-    for name in screening["method_order"]:
+    for name in method_order:
         difference = reward_vectors[name] - ppo
         standard_error = float(difference.std(ddof=1) / np.sqrt(len(difference)))
         rows[name]["paired_reward_difference_vs_ppo_mean"] = float(difference.mean())
@@ -128,7 +176,7 @@ def main() -> None:
         "clean_perplexity": evaluator.clean_perplexity,
         "evaluated_sequences": evaluator.evaluated_sequences,
         "evaluated_tokens": evaluator.evaluated_tokens,
-        "method_order": screening["method_order"],
+        "method_order": method_order,
         "methods": rows,
         "evaluator": evaluator.metadata(),
     }
@@ -139,7 +187,7 @@ def main() -> None:
         fieldnames = ["method", *rows[screening["method_order"][0]].keys()]
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
-        for name in screening["method_order"]:
+        for name in method_order:
             writer.writerow({"method": name, **rows[name]})
     print(json.dumps(payload, indent=2), flush=True)
 
