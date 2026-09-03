@@ -20,10 +20,12 @@ from uav_rl.true_quality import TruePPLQualityEvaluator
 
 
 def _sha256(path: Path) -> str:
+    """计算文件 SHA256，用于确认输入文件未被替换。"""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数，构造本次实验的运行配置。"""
     parser = argparse.ArgumentParser(description=__doc__)
     # 数据路径、模型配置和输出路径全部显式暴露，确保每次 surrogate 实验可审计。
     parser.add_argument('--actions', type=int, default=128)
@@ -43,6 +45,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _build_plan(args: argparse.Namespace, config: ResourceConstrainedConfig, generation: DataGenerationConfig) -> dict:
+    """根据已有数据集和增强参数构造新的采样计划。"""
     rng = np.random.default_rng(args.action_seed)
     channels = generate_resource_channels(args.actions, args.action_seed, config)
     actions = []
@@ -82,6 +85,7 @@ def _build_plan(args: argparse.Namespace, config: ResourceConstrainedConfig, gen
 
 
 def main() -> None:
+    """组织当前脚本的完整实验流程，包括加载、训练或评估和结果保存。"""
     args = parse_args()
     # 先解析参数，再构建/加载数据；这样 --help 和 plan-only 都不会触发真实模型推理。
     if min(args.actions, args.noise_samples, args.progress_interval) < 1:

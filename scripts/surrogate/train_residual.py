@@ -14,6 +14,7 @@ from uav_rl.tail_training import TailValidationCriteria
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数，构造本次实验的运行配置。"""
     parser = argparse.ArgumentParser(description=__doc__)
     # 数据路径、模型配置和输出路径全部显式暴露，确保每次 surrogate 实验可审计。
     parser.add_argument("--device", default="cuda")
@@ -59,6 +60,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """组织当前脚本的完整实验流程，包括加载、训练或评估和结果保存。"""
     args = parse_args()
     # 先解析参数，再构建/加载数据；这样 --help 和 plan-only 都不会触发真实模型推理。
     # residual 训练依赖已经冻结的 global checkpoint，不能直接把它当作独立 surrogate 训练。

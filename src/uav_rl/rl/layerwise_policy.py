@@ -120,6 +120,7 @@ class LayerwiseActorCritic(nn.Module):
     """Independent actor-critic that assigns one layer at a time."""
 
     def __init__(self, config: ResourceConstrainedConfig, hidden_dim: int = 256) -> None:
+        """初始化 layerwise policy 网络，用于逐层选择 UAV。"""
         super().__init__()
         self.config = config
         self.encoder = nn.Sequential(
@@ -132,6 +133,7 @@ class LayerwiseActorCritic(nn.Module):
         self.value_head = nn.Linear(hidden_dim, 1)
 
     def _distribution(self, states: torch.Tensor, masks: torch.Tensor) -> Categorical:
+        """执行 _distribution，完成本模块中的对应数据处理或实验步骤。"""
         if states.ndim != 2 or states.shape[1] != state_dimension(self.config):
             raise ValueError("layer states have the wrong shape")
         if masks.shape != (len(states), self.config.system.num_uavs):
@@ -148,6 +150,7 @@ class LayerwiseActorCritic(nn.Module):
         *,
         deterministic: bool = False,
     ) -> LayerPolicyOutput:
+        """执行 sample，完成本模块中的对应数据处理或实验步骤。"""
         distribution = self._distribution(states, masks)
         actions = (
             torch.argmax(distribution.logits, dim=1)
@@ -165,6 +168,7 @@ class LayerwiseActorCritic(nn.Module):
     def evaluate(
         self, states: torch.Tensor, masks: torch.Tensor, actions: torch.Tensor
     ) -> LayerPolicyOutput:
+        """评估一个 deployment 的资源约束、质量、时延和最终 reward。"""
         distribution = self._distribution(states, masks)
         if not torch.all(masks.gather(1, actions[:, None])):
             raise ValueError("provided layer action is invalid for its state")

@@ -60,6 +60,7 @@ def _method_label(name: str, candidate_samples: int) -> str:
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数，构造本次实验的运行配置。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--run-dir",
@@ -116,6 +117,7 @@ def _metrics(
     details: dict[str, np.ndarray],
 ) -> dict[str, float]:
     # 相邻层的 UAV 编号发生变化，就代表产生一次跨 UAV activation boundary。
+    """汇总各方法的 reward、PPL、时延和 boundary 指标。"""
     boundaries = np.count_nonzero(deployments[:, 1:] != deployments[:, :-1], axis=1)
     # 质量 evaluator 保存的是 log(PPL_noisy / PPL_clean)，报告中同时还原 PPL 比例。
     ppl_ratio = np.exp(details["log_ppl_ratio"].astype(np.float64))
@@ -136,6 +138,7 @@ def _metrics(
 
 
 def _write_report(output: Path, payload: dict) -> None:
+    """把实验结果写成可读报告。"""
     rows = payload["methods"]
     lines = [
         "# Frozen surrogate system-baseline comparison",
@@ -191,6 +194,7 @@ def _write_report(output: Path, payload: dict) -> None:
 
 
 def _plot(output: Path, payload: dict) -> None:
+    """把 benchmark 结果绘制成便于比较的方法对比图。"""
     names = [name for name in payload["method_order"] if name != "random_feasible"]
     labels = [_method_label(name, payload["ppo_candidate_samples"]) for name in names]
     rewards = [payload["methods"][name]["reward_mean"] for name in names]
@@ -220,6 +224,7 @@ def _plot(output: Path, payload: dict) -> None:
 
 
 def main() -> None:
+    """组织当前脚本的完整实验流程，包括加载、训练或评估和结果保存。"""
     args = parse_args()
     if (
         args.channels < 2

@@ -17,6 +17,7 @@ class PPLSurrogate(nn.Module):
     """根据各 boundary 的 drop probability 预测 log(PPL_noisy / PPL_clean)。"""
 
     def __init__(self, num_boundaries: int, hidden_dim: int = 256) -> None:
+        """初始化 surrogate 网络及其输入特征归一化参数。"""
         super().__init__()
         self.num_boundaries = num_boundaries
         # 除原始 drop vector 外，加入总量、峰值、平方和、非零比例和累计 hazard。
@@ -34,6 +35,7 @@ class PPLSurrogate(nn.Module):
         )
 
     def _engineer_features(self, drop_probabilities: torch.Tensor) -> torch.Tensor:
+        """从 boundary drop vector 构造总量、峰值和累计 hazard 等统计特征。"""
         if drop_probabilities.shape[-1] != self.num_boundaries:
             raise ValueError(
                 f"expected {self.num_boundaries} boundary probabilities, "
@@ -62,6 +64,7 @@ class PPLSurrogate(nn.Module):
 
     def forward(self, drop_probabilities: torch.Tensor) -> torch.Tensor:
         # 推理必须复用 checkpoint 保存的均值和尺度，不能用当前 batch 重新归一化。
+        """执行一次前向计算，返回模型对输入的预测结果。"""
         features = self._engineer_features(drop_probabilities)
         normalized = (features - self.feature_mean) / self.feature_scale
         return self.network(normalized).squeeze(-1)
@@ -71,6 +74,7 @@ class PPLSurrogateEnsemble(nn.Module):
     """平均多个独立训练的 PPL surrogate，并输出 ensemble 不确定性。"""
 
     def __init__(self, models: list[PPLSurrogate]) -> None:
+        """初始化 surrogate 网络及其输入特征归一化参数。"""
         super().__init__()
         if not models:
             raise ValueError("a surrogate ensemble must contain at least one model")
@@ -85,6 +89,7 @@ class PPLSurrogateEnsemble(nn.Module):
         drop_probabilities: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # 成员间预测差异反映初始化和训练随机性造成的 epistemic uncertainty。
+        """汇总 ensemble 成员预测，并返回均值和成员间不确定性。"""
         predictions = torch.stack(
             [model(drop_probabilities) for model in self.models],
             dim=0,
@@ -92,6 +97,7 @@ class PPLSurrogateEnsemble(nn.Module):
         return predictions.mean(dim=0), predictions.std(dim=0, unbiased=False)
 
     def forward(self, drop_probabilities: torch.Tensor) -> torch.Tensor:
+        """执行一次前向计算，返回模型对输入的预测结果。"""
         mean, _ = self.predict_with_uncertainty(drop_probabilities)
         return mean
 
@@ -107,6 +113,7 @@ class TailGatedSurrogate(nn.Module):
         hazard_threshold: float = 0.4,
         hazard_temperature: float = 0.03,
     ) -> None:
+        """初始化 surrogate 网络及其输入特征归一化参数。"""
         super().__init__()
         if not expert_models:
             raise ValueError("a tail-gated surrogate needs at least one expert")
@@ -128,6 +135,7 @@ class TailGatedSurrogate(nn.Module):
 
     def gate(self, drop_probabilities: torch.Tensor) -> torch.Tensor:
         # hazard 越高，样本越可能落入训练数据稀疏的 tail 区域，gate 越接近 1。
+        """根据累计 packet-loss hazard 计算 tail 分支的启用权重。"""
         hazard = -torch.log1p(
             -drop_probabilities.clamp_max(1.0 - 1e-6)
         ).sum(dim=-1)
@@ -139,6 +147,7 @@ class TailGatedSurrogate(nn.Module):
         self,
         drop_probabilities: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """汇总 ensemble 成员预测，并返回均值和成员间不确定性。"""
         base_predictions = torch.stack(
             [model(drop_probabilities) for model in self.base_model.models], dim=0
         )
@@ -151,6 +160,7 @@ class TailGatedSurrogate(nn.Module):
         return blended.mean(dim=0), blended.std(dim=0, unbiased=False)
 
     def forward(self, drop_probabilities: torch.Tensor) -> torch.Tensor:
+        """执行一次前向计算，返回模型对输入的预测结果。"""
         mean, _ = self.predict_with_uncertainty(drop_probabilities)
         return mean
 
@@ -170,6 +180,7 @@ class TailResidualSurrogate(nn.Module):
         hazard_threshold: float = 0.4,
         hazard_temperature: float = 0.03,
     ) -> None:
+        """初始化 surrogate 网络及其输入特征归一化参数。"""
         super().__init__()
         if not residual_models:
             raise ValueError("a tail-residual surrogate needs at least one member")
@@ -186,6 +197,7 @@ class TailResidualSurrogate(nn.Module):
             parameter.requires_grad_(False)
 
     def gate(self, drop_probabilities: torch.Tensor) -> torch.Tensor:
+        """根据累计 packet-loss hazard 计算 tail 分支的启用权重。"""
         hazard = -torch.log1p(
             -drop_probabilities.clamp_max(1.0 - 1e-6)
         ).sum(dim=-1)
@@ -197,6 +209,7 @@ class TailResidualSurrogate(nn.Module):
         self,
         drop_probabilities: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """汇总 ensemble 成员预测，并返回均值和成员间不确定性。"""
         base_predictions = torch.stack(
             [model(drop_probabilities) for model in self.base_model.models], dim=0
         )
@@ -210,6 +223,7 @@ class TailResidualSurrogate(nn.Module):
         return corrected.mean(dim=0), corrected.std(dim=0, unbiased=False)
 
     def forward(self, drop_probabilities: torch.Tensor) -> torch.Tensor:
+        """执行一次前向计算，返回模型对输入的预测结果。"""
         mean, _ = self.predict_with_uncertainty(drop_probabilities)
         return mean
 
@@ -299,6 +313,7 @@ def train_surrogate(
         validation_prediction = model(validation_x)
 
     def metrics(prediction: torch.Tensor, target: torch.Tensor) -> tuple[float, float]:
+        """计算预测值与真实标签之间的回归误差指标。"""
         mae = torch.mean(torch.abs(prediction - target)).item()
         denominator = torch.sum((target - target.mean()) ** 2)
         r2 = 1.0 - torch.sum((prediction - target) ** 2) / denominator

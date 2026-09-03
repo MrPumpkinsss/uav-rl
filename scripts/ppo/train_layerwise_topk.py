@@ -32,6 +32,7 @@ def _sha256(path: Path) -> str:
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数，构造本次实验的运行配置。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run-dir', type=Path, default=Path('artifacts/runs/surrogate_ppo/layerwise_topk'), help='当前 PPO run 的输出目录。')
     parser.add_argument('--surrogate', type=Path, default=Path('artifacts/models/ppl_surrogate_general_assignment_ensemble.pth'), help='冻结的 surrogate checkpoint。')
@@ -61,6 +62,7 @@ def _write_json(path: Path, payload: dict) -> None:
 
 
 def main() -> None:
+    """组织当前脚本的完整实验流程，包括加载、训练或评估和结果保存。"""
     args = parse_args()
     if min(args.episodes, args.rollout_size, args.checkpoint_interval_episodes, args.top_k, args.true_channels, args.true_noise_samples) < 1:
         raise ValueError('episode, rollout, checkpoint, Top-K, and validation values must be positive')

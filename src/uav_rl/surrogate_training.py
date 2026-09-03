@@ -38,6 +38,7 @@ class EnsembleTrainingConfig:
     maximum_sample_weight: float = 8.0
 
     def __post_init__(self) -> None:
+        """校验数据类中的配置取值，尽早报告不合法参数。"""
         if min(self.member_count, self.hidden_dim, self.epochs, self.patience) < 1:
             raise ValueError("ensemble sizes and epoch counts must be positive")
         if self.learning_rate <= 0.0 or self.weight_decay < 0.0:
@@ -65,10 +66,12 @@ class SurrogateAcceptanceCriteria:
 
 
 def _sha256(path: Path) -> str:
+    """计算文件 SHA256，用于确认输入文件未被替换。"""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _load_split(path: Path) -> dict[str, np.ndarray]:
+    """执行 _load_split，完成本模块中的对应数据处理或实验步骤。"""
     required = {
         "drop_probabilities",
         "log_ppl_ratio",
@@ -120,6 +123,7 @@ def _rankdata(values: np.ndarray) -> np.ndarray:
 
 
 def _correlation(left: np.ndarray, right: np.ndarray) -> float:
+    """执行 _correlation，完成本模块中的对应数据处理或实验步骤。"""
     left = np.asarray(left, dtype=np.float64)
     right = np.asarray(right, dtype=np.float64)
     if left.size < 2 or np.std(left) == 0.0 or np.std(right) == 0.0:
@@ -305,6 +309,7 @@ def assess_acceptance(
 
 
 def _set_seed(seed: int) -> None:
+    """固定 Python、NumPy 和 PyTorch 的随机状态，保证实验可复现。"""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -357,6 +362,7 @@ def _weighted_loss(
     weights: torch.Tensor,
     config: EnsembleTrainingConfig,
 ) -> torch.Tensor:
+    """计算带样本权重的 MSE 或 Huber 回归损失。"""
     if config.loss_kind == "mse":
         elementwise = torch.square(prediction - target)
     else:
@@ -383,6 +389,7 @@ def _train_member(
     member_index: int,
     device: torch.device,
 ) -> tuple[PPLSurrogate, dict[str, float | int]]:
+    """训练一个 ensemble member，并保留 validation 最优状态。"""
     member_seed = config.seed + member_index
     _set_seed(member_seed)
     model = PPLSurrogate(train_x.shape[1], config.hidden_dim).to(device)
@@ -446,6 +453,7 @@ def _train_member(
 def _predict(
     model: PPLSurrogateEnsemble, features: np.ndarray, device: torch.device
 ) -> tuple[np.ndarray, np.ndarray]:
+    """用 surrogate 对一批输入生成预测和不确定性。"""
     model = model.to(device).eval()
     inputs = torch.from_numpy(features.astype(np.float32, copy=False)).to(device)
     with torch.no_grad():
@@ -460,6 +468,7 @@ def _plot_diagnostics(
     uncertainty: np.ndarray,
     output_directory: Path,
 ) -> dict[str, str]:
+    """绘制 surrogate 误差、排序和不确定性诊断图。"""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -507,6 +516,7 @@ def _plot_diagnostics(
 
 
 def _write_report(path: Path, result: dict[str, Any]) -> None:
+    """把实验结果写成可读报告。"""
     test = result["test_metrics"]
     acceptance = result["acceptance"]
     regret = test["grouped_reward_regret"]

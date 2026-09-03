@@ -51,6 +51,7 @@ class ResourceConstrainedConfig:
     compute_energy_coefficient: float = 0.45
 
     def __post_init__(self) -> None:
+        """校验数据类中的配置取值，尽早报告不合法参数。"""
         layers = self.system.num_layers
         uavs = self.system.num_uavs
         if self.layer_memory_units is None:
@@ -100,6 +101,7 @@ class ResourceConstrainedConfig:
             raise ValueError("each UAV energy budget must exceed its hover energy")
 
     def to_dict(self) -> dict[str, object]:
+        """将当前配置或 action 转换为可序列化的字典。"""
         return asdict(self)
 
 

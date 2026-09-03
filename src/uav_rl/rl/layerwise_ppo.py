@@ -37,6 +37,7 @@ class LayerwisePPOTrainer:
         teacher_action_provider: Callable[[np.ndarray], np.ndarray] | None = None,
         max_policy_boundaries: int = 4,
     ) -> None:
+        """初始化 layerwise PPO 训练器及其策略、优化器和运行状态。"""
         self.config = config
         self.resource_config = resource_config
         self.environment = environment
@@ -59,6 +60,7 @@ class LayerwisePPOTrainer:
         *,
         deterministic: bool,
     ) -> tuple[list[np.ndarray], list[np.ndarray], list[int], list[float], list[float], np.ndarray]:
+        """执行一条 PPO rollout，采样 action 并计算对应 reward。"""
         layers = self.resource_config.system.num_layers
         uavs = self.resource_config.system.num_uavs
         memory_used = np.zeros(uavs, dtype=np.float64)
@@ -120,6 +122,7 @@ class LayerwisePPOTrainer:
         return states, masks, actions, log_probs, values, deployment
 
     def deployments(self, channels: np.ndarray, *, deterministic: bool) -> np.ndarray:
+        """根据策略生成多个可行 deployment，供 deterministic 或 Top-K 评估使用。"""
         normalized = self.environment.normalize_channels(channels)
         return np.stack(
             [self._rollout_one(channel, deterministic=deterministic)[-1] for channel in normalized]
@@ -132,6 +135,7 @@ class LayerwisePPOTrainer:
         k: int,
         samples_per_channel: int | None = None,
     ):
+        """生成候选 deployment 并按 surrogate reward 排序，返回前 k 个候选。"""
         if k < 1:
             raise ValueError('k must be positive')
         channels = np.asarray(channels, dtype=np.float32)
@@ -184,6 +188,7 @@ class LayerwisePPOTrainer:
         return np.stack(candidates), np.stack(rewards)
 
     def _validation_reward(self, channels: np.ndarray) -> float:
+        """在 validation context 上评估当前策略的平均 reward。"""
         deployments = self.deployments(channels, deterministic=True)
         rewards, _ = self.environment.evaluate(
             channels, deployments, noise_seeds=self.validation_noise_seeds
@@ -191,6 +196,7 @@ class LayerwisePPOTrainer:
         return float(rewards.mean())
 
     def _behavior_clone(self) -> list[float]:
+        """用已有高质量 deployment 对策略进行行为克隆预热。"""
         if self.config.teacher_channels == 0 or self.config.behavior_cloning_epochs == 0:
             return []
         if self.teacher_action_provider is None:
@@ -265,6 +271,7 @@ class LayerwisePPOTrainer:
         return losses
 
     def _atomic_save(self, payload: dict[str, Any], path: Path) -> None:
+        """执行 _atomic_save，完成本模块中的对应数据处理或实验步骤。"""
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(path.suffix + ".tmp")
         torch.save(payload, temporary)
@@ -274,6 +281,7 @@ class LayerwisePPOTrainer:
         temporary.replace(path)
 
     def _candidate_payload(self, episodes: int, monitor_reward: float) -> dict[str, Any]:
+        """执行 _candidate_payload，完成本模块中的对应数据处理或实验步骤。"""
         return {
             "format_version": 1,
             "purpose": "external_policy_validation_candidate",

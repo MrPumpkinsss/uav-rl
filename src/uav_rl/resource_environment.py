@@ -29,6 +29,7 @@ class ResourceDeploymentEnvironment:
         quality_evaluator: QualityEvaluator | SurrogateModel,
         latency_reference: float,
     ) -> None:
+        """初始化资源环境，并检查系统配置是否满足实验要求。"""
         if latency_reference <= 0.0:
             raise ValueError("latency_reference must be positive")
         self.config = config
@@ -44,9 +45,11 @@ class ResourceDeploymentEnvironment:
 
     @property
     def system(self):
+        """返回当前实验使用的系统配置。"""
         return self.config.system
 
     def normalize_channels(self, channels: np.ndarray) -> np.ndarray:
+        """将原始信道质量归一化为策略网络使用的状态范围。"""
         scale = self.system.channel_gain_max - self.system.channel_gain_min
         return ((np.asarray(channels) - self.system.channel_gain_min) / scale).astype(np.float32)
 
@@ -57,6 +60,7 @@ class ResourceDeploymentEnvironment:
         *,
         noise_seeds: np.ndarray | None = None,
     ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+        """评估一个 deployment 的资源约束、质量、时延和最终 reward。"""
         channels = np.asarray(channels, dtype=np.float32)
         deployments = np.asarray(deployments, dtype=np.int64)
         if channels.ndim != 3 or channels.shape[1:] != (self.system.num_uavs, self.system.num_uavs):

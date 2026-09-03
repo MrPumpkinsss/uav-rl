@@ -21,6 +21,7 @@ from uav_rl.true_quality import TruePPLQualityEvaluator
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数，构造本次实验的运行配置。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--comparison-dir", type=Path, required=True)
     parser.add_argument(
@@ -49,6 +50,7 @@ def _metrics_for_true(
     evaluator: TruePPLQualityEvaluator,
 ) -> dict[str, float]:
     # true evaluator 返回相对退化 log(PPL_noisy / PPL_clean)，这里还原绝对 PPL。
+    """汇总真实 LLM 评估得到的 PPL、reward 和时延指标。"""
     boundaries = np.count_nonzero(deployments[:, 1:] != deployments[:, :-1], axis=1)
     ppl = evaluator.clean_perplexity * np.exp(details["log_ppl_ratio"].astype(np.float64))
     return {

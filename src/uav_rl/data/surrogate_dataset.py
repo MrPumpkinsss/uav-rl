@@ -54,6 +54,7 @@ class SurrogateDatasetConfig:
     latency_reference_seconds: float = 1.3077757414751234
 
     def __post_init__(self) -> None:
+        """校验数据类中的配置取值，尽早报告不合法参数。"""
         if min(
             self.training_noise_samples,
             self.validation_noise_samples,
@@ -80,6 +81,7 @@ class SurrogateAction:
     noise_seeds: list[int]
 
     def to_dict(self) -> dict[str, Any]:
+        """将当前配置或 action 转换为可序列化的字典。"""
         return asdict(self)
 
 
@@ -91,6 +93,7 @@ def canonical_json_hash(payload: Any) -> str:
 
 
 def _atomic_write_json(path: Path, payload: Any) -> None:
+    """执行 _atomic_write_json，完成本模块中的对应数据处理或实验步骤。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -119,6 +122,7 @@ def _sample_seeds_excluding(
 
 
 def _load_existing_noise_seeds(cache_path: Path) -> dict[SplitName, set[int]]:
+    """执行 _load_existing_noise_seeds，完成本模块中的对应数据处理或实验步骤。"""
     seeds: dict[SplitName, set[int]] = {
         "train": set(),
         "validation": set(),
@@ -176,6 +180,7 @@ def _make_action(
     noise_seeds: np.ndarray,
     system: SystemConfig,
 ) -> SurrogateAction:
+    """把 deployment、标签和实验元数据组装为一个采样 action。"""
     probabilities = boundary_drop_probabilities(deployment, channel, system)
     latency = collaborative_latency(deployment, channel, system).total_seconds
     return SurrogateAction(
@@ -197,6 +202,7 @@ def _build_training_actions(
     system: SystemConfig,
     config: SurrogateDatasetConfig,
 ) -> list[SurrogateAction]:
+    """执行 _build_training_actions，完成本模块中的对应数据处理或实验步骤。"""
     source_counts = (
         ("coverage", 320),
         ("random", 256),
@@ -263,6 +269,7 @@ def _build_grouped_evaluation_actions(
     system: SystemConfig,
     config: SurrogateDatasetConfig,
 ) -> list[SurrogateAction]:
+    """构造 validation/test 阶段按组共享候选的 action 计划。"""
     rng = np.random.default_rng(channel_seed)
     channels = np.stack([sample_channel(rng, system) for _ in range(channel_count)])
     strong = strong_link_baseline(channels, system)
@@ -302,6 +309,7 @@ def _build_grouped_evaluation_actions(
 
 
 def _validate_action_plan(actions: list[SurrogateAction]) -> None:
+    """检查 action 计划的字段、shape、split 和 noise seed 一致性。"""
     action_ids = [action.action_id for action in actions]
     if len(action_ids) != len(set(action_ids)):
         raise ValueError("action plan contains duplicate action ids")
@@ -472,6 +480,7 @@ def _validate_imported_context_isolation(
 
 
 def _append_jsonl(path: Path, record: dict[str, Any]) -> None:
+    """执行 _append_jsonl，完成本模块中的对应数据处理或实验步骤。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as output:
         output.write(json.dumps(record, separators=(",", ":")) + "\n")
@@ -480,6 +489,7 @@ def _append_jsonl(path: Path, record: dict[str, Any]) -> None:
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
+    """执行 _load_jsonl，完成本模块中的对应数据处理或实验步骤。"""
     if not path.exists():
         return []
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -695,6 +705,7 @@ def _aggregate_fresh_actions(
     plan: dict[str, Any],
     sample_records: list[dict[str, Any]],
 ) -> dict[SplitName, list[dict[str, Any]]]:
+    """执行 _aggregate_fresh_actions，完成本模块中的对应数据处理或实验步骤。"""
     records_by_action: dict[str, list[dict[str, Any]]] = {}
     for record in sample_records:
         records_by_action.setdefault(str(record["action_id"]), []).append(record)
@@ -731,6 +742,7 @@ def _aggregate_fresh_actions(
 
 
 def _validate_aggregated_splits(rows: dict[SplitName, list[dict[str, Any]]]) -> None:
+    """执行 _validate_aggregated_splits，完成本模块中的对应数据处理或实验步骤。"""
     drop_keys: dict[str, set[bytes]] = {}
     seed_sets: dict[str, set[int]] = {}
     context_pairs: dict[str, set[tuple[bytes, bytes]]] = {}
@@ -812,6 +824,7 @@ def _split_isolation_audit(
 
 
 def _write_split_dataset(path: Path, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """执行 _write_split_dataset，完成本模块中的对应数据处理或实验步骤。"""
     if not rows:
         raise ValueError(f"cannot write an empty surrogate split: {path}")
     seed_counts = {len(np.asarray(row["noise_seeds"])) for row in rows}
