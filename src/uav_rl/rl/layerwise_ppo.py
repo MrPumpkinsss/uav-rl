@@ -305,15 +305,25 @@ class LayerwisePPOTrainer:
         candidate_interval_episodes: int,
         resume: bool = False,
     ) -> dict[str, list[float]]:
-        """Train with atomic rollout-boundary state and exact candidate intervals."""
+        """训练 layerwise PPO，并在训练过程中保存可恢复状态和候选策略。
 
+        每轮先用当前策略采样多个 layer-to-UAV deployment，再由资源环境计算
+        reward、PPL 相对退化和时延；随后按照 PPO clipped objective 更新
+        Actor-Critic 网络。validation reward 用来选择最优模型，state_path
+        保存完整随机状态、优化器状态和训练历史，因此可以安全 resume。
+        """
+
+        # candidate_interval_episodes 决定多久导出一次候选策略，同时让保存点
+        # 落在完整 rollout 之后，避免中断时留下半个 rollout 的不一致状态。
         if candidate_interval_episodes < 1:
             raise ValueError("candidate interval must be positive")
         candidate_directory.mkdir(parents=True, exist_ok=True)
+        # validation channel 在整个训练期间固定，只用于比较不同 checkpoint 的策略质量。
         validation_channels = generate_resource_channels(
             self.config.validation_channels, self.config.validation_seed, self.resource_config
         )
         if resume:
+            # resume 时恢复模型、优化器和三套随机状态，保证续训不会改变实验轨迹。
             state = torch.load(state_path, map_location="cpu", weights_only=False)
             if state.get("run_metadata") != run_metadata or state.get("policy_type") != self.policy_type:
                 raise ValueError("layerwise resume metadata is incompatible")
@@ -343,6 +353,7 @@ class LayerwisePPOTrainer:
             noise_rng = np.random.default_rng()
             noise_rng.bit_generator.state = state["noise_rng_state"]
         else:
+            # 新训练先进行 behavior cloning 预热，再建立独立的 channel/noise 随机流。
             history = {
                 "behavior_cloning_loss": self._behavior_clone(),
                 "reward": [],
@@ -359,7 +370,9 @@ class LayerwisePPOTrainer:
             best_episodes = 0
             best_model_state = deepcopy(self.model.state_dict())
 
+        # 外层循环以 rollout 为单位推进；每次 rollout 后才增加 completed episode 数。
         while completed < self.config.training_episodes:
+            # 不跨越 candidate interval，确保候选策略按精确 episode 间隔导出。
             rollout_size = min(
                 self.config.rollout_size,
                 candidate_interval_episodes - completed % candidate_interval_episodes,
@@ -373,6 +386,7 @@ class LayerwisePPOTrainer:
             all_old_log_probs: list[float] = []
             all_old_values: list[float] = []
             deployments: list[np.ndarray] = []
+            # 对每个 channel 自回归地为所有 layer 选择 UAV，记录 PPO 更新所需的旧策略量。
             for channel in normalized:
                 states, masks, actions, log_probs, values, deployment = self._rollout_one(
                     channel, deterministic=False
@@ -387,6 +401,8 @@ class LayerwisePPOTrainer:
             noise_seeds = sample_training_noise_seeds(
                 noise_rng, rollout_size, self.config.training_noise_samples
             )
+            # reward 在 rollout 结束后统一计算；同一个 deployment 的所有 layer step
+            # 共享该 episode reward，形成 Monte-Carlo return 的训练目标。
             rewards_np, details = self.environment.evaluate(
                 channels, deployments_array, noise_seeds=noise_seeds
             )
@@ -395,27 +411,33 @@ class LayerwisePPOTrainer:
             actions_tensor = torch.tensor(all_actions, dtype=torch.long)
             old_log_probs = torch.tensor(all_old_log_probs, dtype=torch.float32)
             old_values = torch.tensor(all_old_values, dtype=torch.float32)
+            # 每个 episode reward 复制到对应的 layer steps，再用 V(s) 得到 advantage。
             returns = torch.from_numpy(np.repeat(rewards_np, self.resource_config.system.num_layers))
             advantages = returns - old_values
             normalized_advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            # PPO 对同一批 on-policy 数据进行多轮 minibatch 更新。
             for _ in range(self.config.update_epochs):
                 order = torch.randperm(len(all_actions))
                 for start in range(0, len(order), self.config.minibatch_size):
                     index = order[start : start + self.config.minibatch_size]
+                    # 用更新后的策略重新计算 log-probability/value，和 rollout 时的旧值比较。
                     output = self.model.evaluate(states_tensor[index], masks_tensor[index], actions_tensor[index])
                     ratio = torch.exp(output.log_probabilities - old_log_probs[index])
                     advantage = normalized_advantages[index]
+                    # clipped objective 限制新旧策略比率，防止一次更新幅度过大。
                     policy_loss = -torch.minimum(
                         ratio * advantage,
                         torch.clamp(ratio, 1.0 - self.config.clip_epsilon, 1.0 + self.config.clip_epsilon)
                         * advantage,
                     ).mean()
+                    # Critic 拟合 return；entropy bonus 鼓励 Actor 保留必要探索。
                     value_loss = torch.mean((output.values - returns[index]) ** 2)
                     loss = policy_loss + self.config.value_coefficient * value_loss - self.config.entropy_coefficient * output.entropy.mean()
                     self.optimizer.zero_grad()
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
                     self.optimizer.step()
+            # 只有 PPO 更新完成后才提交本轮进度，保证 checkpoint 位于一致边界。
             completed += rollout_size
             rollout_index += 1
             history["reward"].append(float(rewards_np.mean()))
@@ -424,6 +446,7 @@ class LayerwisePPOTrainer:
             history["invalid_fraction"].append(float(details["invalid"].mean()))
             candidate_due = completed % candidate_interval_episodes == 0
             monitor = best_reward
+            # 定期在固定 validation channel 上评估；只有更好的 reward 才覆盖 best model。
             if candidate_due or completed == self.config.training_episodes or rollout_index % self.config.validation_interval == 0:
                 monitor = self._validation_reward(validation_channels)
                 history["validation_reward"].append(monitor)
@@ -433,6 +456,7 @@ class LayerwisePPOTrainer:
                     best_model_state = deepcopy(self.model.state_dict())
             if candidate_due:
                 self._atomic_save(self._candidate_payload(completed, monitor), candidate_directory / f"episode_{completed:06d}.pth")
+            # 每轮都保存可恢复状态，包含随机数状态和历史指标，支持中断后精确续训。
             self._atomic_save(
                 {
                     "format_version": 1,
