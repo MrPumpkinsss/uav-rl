@@ -63,7 +63,3 @@ it is also not true-LLM evidence.
 The screening script stores `channels.npy` and `frozen_deployments.npz`. True-LLM
 evaluation must consume those exact files. It is forbidden to rerun EdgeShard,
 HexGen-inspired, PPO, or another selector after inspecting true PPL.
-
-## LinguaLinked-UAV
-
-`src/uav_rl/system_baselines/lingualinked_uav.py` implements a capability-balanced contiguous pipeline adaptation. It estimates each UAV's layer capacity from compute speed, memory, and remaining energy, enumerates bounded integer shard sizes, and chooses the feasible UAV order with the lowest analytical communication-aware latency. It does not query the PPL surrogate. This is an adaptation to the repository action space, not a reproduction of the original mobile-device runtime or throughput scheduler.

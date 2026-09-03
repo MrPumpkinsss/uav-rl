@@ -23,7 +23,6 @@ import torch
 from uav_rl.system_baselines import (
     edge_shard_uav_baseline,
     hexgen_inspired_search_baseline,
-    lingualinked_uav_baseline,
 )
 from uav_rl.resource_baselines import (
     jointdnn_multi_uav_baseline,
@@ -42,7 +41,6 @@ METHOD_LABELS = {
     "ppo_surrogate_top1": "PPO surrogate-selected",
     "edge_shard_uav": "EdgeShard-UAV",
     "hexgen_inspired": "HexGen-inspired",
-    "lingualinked_uav": "LinguaLinked-UAV",
     "jointdnn_multi_uav": "JointDNN-MUAV",
     "pipeedge_uav_latency": "PipeEdge-UAV",
     "petals_balanced": "Petals-balanced",
@@ -280,7 +278,6 @@ def main() -> None:
             generations=args.hexgen_generations,
             seed=args.random_seed + 2,
         ),
-        "lingualinked_uav": lambda: lingualinked_uav_baseline(channels, resource_config),
         "jointdnn_multi_uav": lambda: jointdnn_multi_uav_baseline(
             channels,
             resource_config,

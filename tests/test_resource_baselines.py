@@ -14,7 +14,6 @@ from uav_rl.system_baselines import (
     edge_shard_uav_baseline,
     exact_grouped_reward_oracle,
     hexgen_inspired_search_baseline,
-    lingualinked_uav_baseline,
 )
 from uav_rl.resource_baselines import (
     constrained_genetic_surrogate_baseline,
@@ -257,23 +256,3 @@ def test_exact_grouped_oracle_matches_manual_group_enumeration() -> None:
     assert result.total_assignments == 27
     assert result.feasible_assignments == len(deployments)
     assert result.reward == pytest.approx(float(rewards.max()))
-
-
-def test_lingualinked_uav_is_deterministic_capability_balanced_and_feasible() -> None:
-    config = _small_config()
-    channels = np.asarray(
-        [
-            [
-                [20.0, 3.0, 15.0],
-                [3.0, 20.0, 8.0],
-                [15.0, 8.0, 20.0],
-            ]
-        ],
-        dtype=np.float32,
-    )
-    first = lingualinked_uav_baseline(channels, config)
-    second = lingualinked_uav_baseline(channels, config)
-    assert np.array_equal(first, second)
-    validate_layerwise_deployment(first[0], config, channel=channels[0])
-    block_uavs = first[0][np.r_[True, first[0][1:] != first[0][:-1]]]
-    assert len(block_uavs) == len(set(block_uavs.tolist()))

@@ -10,7 +10,7 @@ $env:PYTHONPATH = "src"
 
 | Script | Purpose |
 | --- | --- |
-| `baselines/compare_system_baselines.py` | Freeze and compare the current PPO and system baselines, including LinguaLinked-UAV, EdgeShard-UAV and HexGen-inspired, with the common surrogate. |
+| `baselines/compare_system_baselines.py` | Freeze and compare the current PPO and system baselines, including EdgeShard-UAV and HexGen-inspired, with the common surrogate. |
 | `baselines/evaluate_frozen_system_baselines_true.py` | Evaluate those exact frozen deployments with the matching true LLM and shared noise seeds. |
 
 ## PPO

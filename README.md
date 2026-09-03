@@ -9,7 +9,7 @@
 3. 学习型在线策略能否达到有竞争力的质量—时延折中，同时减少逐 channel 搜索成本；
 4. surrogate 筛选结果能否通过冻结 deployment 的真实 LLM 评估得到确认。
 
-> **证据边界（必须保留）**：截至 2026-09-01，新增 EdgeShard-UAV、HexGen-inspired 和 LinguaLinked-UAV 已完成 64-channel **surrogate benchmark**，但尚未完成匹配模型的 true-LLM 复验。下面的新增方法排名不能写成最终真实 PPL 排名。
+> **证据边界（必须保留）**：截至 2026-09-01，新增 EdgeShard-UAV 和 HexGen-inspired 已完成 64-channel **surrogate benchmark**，但尚未完成匹配模型的 true-LLM 复验。下面的新增方法排名不能写成最终真实 PPL 排名。
 
 ---
 
@@ -293,21 +293,7 @@ src/uav_rl/system_baselines/edge_shard_uav.py
 
 代码用动态规划枚举可行的 UAV 顺序和 block 边界，并检查内存、计算能耗和通信能耗。由于我们没有复现原 EdgeShard 的完整运行时，所以论文中应称为 **EdgeShard-UAV adaptation**，而不是原方法的完整复现。
 
-### 4.4 LinguaLinked-UAV：能力感知的移动设备流水线
-
-论文：[LinguaLinked: Distributed Large Language Model Inference on Mobile Devices](https://aclanthology.org/2024.acl-demos.16/)
-
-LinguaLinked-UAV 借鉴移动设备协同 LLM 推理中的“按设备能力分配模型、再根据通信条件组织流水线”的思路。代码先根据 UAV 的计算速度、内存和剩余能量估计每台 UAV 应承担的 layer 数，再枚举可行的 UAV 顺序和连续 block，最后选择通信时延最低的方案。它不使用 PPL surrogate，因此可以作为不依赖学习质量模型的移动设备协同 baseline。
-
-实现文件：
-
-```text
-src/uav_rl/system_baselines/lingualinked_uav.py
-```
-
-这里的实现是适配当前 layer-assignment action space 的 **LinguaLinked-UAV adaptation**，并没有复现原方法的完整移动设备 runtime、并行请求调度或系统吞吐量实验。
-
-### 4.5 HexGen-inspired：拓扑感知搜索
+### 4.4 HexGen-inspired：拓扑感知搜索
 
 论文：[HexGen: Generative Inference of Large Language Model over Heterogeneous Environment](https://proceedings.mlr.press/v235/jiang24f.html)
 
@@ -321,46 +307,45 @@ src/uav_rl/system_baselines/hexgen_search.py
 
 它会读取冻结的 surrogate reward，所以比 EdgeShard-UAV 使用了更多质量信息，也会花费更长的搜索时间。这个实现借鉴的是 HexGen 的异构拓扑搜索思想，没有复现其 tensor parallelism、serving runtime 和请求调度，因此统一称为 **HexGen-inspired**。
 
-### 4.6 Simulated annealing：通用搜索方法
+### 4.5 Simulated annealing：通用搜索方法
 
 经典论文：[Optimization by Simulated Annealing](https://doi.org/10.1126/science.220.4598.671)
 
 模拟退火从一个可行 deployment 开始，随机修改某一层或一段连续层。如果新方案更好就接受；即使暂时变差，也可能以一定概率接受，从而跳出局部最优。它直接使用 surrogate reward，是质量导向较强的搜索 baseline，但每个 channel 都要单独搜索，决策时间明显高于 PPO。
 
-### 4.7 Petals-balanced：流水线均衡方法
+### 4.6 Petals-balanced：流水线均衡方法
 
 论文：[Petals: Collaborative Inference and Fine-tuning of Large Models](https://aclanthology.org/2023.acl-demo.54/)
 
 Petals-balanced 把模型切成连续 block，并尽量让各个 pipeline stage 的计算负载均衡。它适合检验一种常见的 LLM 分布式推理思路：如果只追求 pipeline 平衡，而不针对 UAV 信道和质量损失做优化，最终的综合 reward 是否会下降。
 
-### 4.8 Neurosurgeon-inspired：经典双设备切分
+### 4.7 Neurosurgeon-inspired：经典双设备切分
 
 论文：[Neurosurgeon: Collaborative Intelligence Between the Cloud and Mobile Edge](https://doi.org/10.1145/3037697.3037698)
 
 Neurosurgeon-inspired 只考虑两台 UAV 和一个切分点。它枚举不同切分位置和 UAV 组合，再用解析的质量—时延 proxy 选出最优方案。这个 baseline 简单、容易解释，但表达能力明显低于允许任意 layer assignment 的 PPO。
 
-### 4.9 JointDNN-MUAV：数学优化对照
+### 4.8 JointDNN-MUAV：数学优化对照
 
 论文：[JointDNN: An Efficient Training and Inference Engine for Intelligent Mobile Cloud Computing Services](https://arxiv.org/abs/1801.08618)
 
 JointDNN-MUAV 用 MILP 同时表示 layer placement 和跨 UAV boundary，并加入内存、能量和通信约束。它代表较早的显式数学优化思路。由于 JointDNN 较早，本项目保留它作为历史和附录对照，不再把它作为唯一的核心 baseline。
 
-### 4.10 PipeEdge-UAV：纯时延对照
+### 4.9 PipeEdge-UAV：纯时延对照
 
 论文：[PipeEdge: Pipeline Parallelism for Large-Scale Model Inference on Heterogeneous Edge Devices](https://doi.org/10.1109/DSD57027.2022.00048)
 
 PipeEdge-UAV 使用动态规划选择 UAV 顺序和连续 block，目标只有计算时延加通信时延。它可以说明一个重要 trade-off：时延最低的 deployment 不一定具有最低的 PPL，也不一定具有最好的综合 reward。
 
-### 4.11 Random feasible：下界
+### 4.10 Random feasible：下界
 
 Random feasible 只随机生成满足资源约束的 deployment，不使用信道质量、surrogate 或 latency 目标。它不是竞争方法，而是 sanity check，用来确认经过优化的 deployment 确实比随机可行方案更好。
 
-### 4.12 方法对比关系
+### 4.11 方法对比关系
 
 | 方法 | 主要思想 | 是否使用 surrogate | 主要优点 | 主要局限 |
 | --- | --- | --- | --- | --- |
 | **PPO** | 学习在线 layer placement policy | 训练时使用 | 在线决策快，适应动态信道 | 需要训练，性能依赖泛化 |
-| **LinguaLinked-UAV** | 按设备能力分配 block，再按信道排序 | 否 | 贴近移动设备协同推理 | 质量目标没有直接进入选择 |
 | **EdgeShard-UAV** | DP 选择连续分片 | 否 | 解释简单，时延开销较低 | 只能使用连续且不重复的 UAV block |
 | **HexGen-inspired** | 拓扑感知进化搜索 | 是 | 搜索能力强，能直接优化 reward | 每个 channel 都需要搜索，较慢 |
 | **Simulated annealing** | 随机邻域搜索 | 是 | 容易跳出局部最优 | 在线成本很高 |
@@ -370,7 +355,7 @@ Random feasible 只随机生成满足资源约束的 deployment，不使用信�
 | **PipeEdge-UAV** | DP 最小化 latency | 否 | 能体现时延下界 | 忽略质量目标 |
 | **Random feasible** | 随机可行部署 | 否 | 提供性能下界 | 不进行优化 |
 
-### 4.13 RL 算法消融
+### 4.12 RL 算法消融
 
 RL 消融只比较：
 
@@ -413,7 +398,6 @@ channel seed                 = 20260910
 PPO deterministic             = one policy forward
 PPO surrogate-selected        = 从 20 个候选中选择 surrogate reward 最高的 1 个
 EdgeShard plans/state       = 8
-LinguaLinked-UAV            = capability-balanced contiguous pipeline
 HexGen-inspired population  = 48
 HexGen-inspired generations = 48
 JointDNN time limit         = 1.0 second/channel
@@ -434,7 +418,6 @@ GPU                          = NVIDIA GeForce RTX 5070 Ti
 | **PPO deterministic** | -0.383815 | 0 | 0.207401 | 0.735128 | 2.062 | **8.26** |
 | **PPO surrogate-selected（20 选 1）** | **-0.373300** | +0.010515 `[+0.001859, +0.019172]` | **0.197015** | 0.721161 | 2.016 | 183.76 |
 | **HexGen-inspired** | -0.372926 | +0.010890 `[-0.004879, 0.026658]` | 0.204905 | 0.709825 | 2.000 | 794.66 |
-| LinguaLinked-UAV | -0.544335 | -0.160519 `[-0.175725, -0.145314]` | 0.313883 | 1.016668 | 3.000 | 712.56 |
 | Simulated annealing | -0.373881 | +0.009935 `[-0.005966, 0.025835]` | **0.203512** | 0.714160 | 2.000 | 2973.18 |
 | Neurosurgeon-inspired | -0.388179 | -0.004363 `[-0.020974, 0.012247]` | 0.238366 | 0.705948 | 2.000 | 209.05 |
 | JointDNN-MUAV | -0.398647 | -0.014832 `[-0.032614, 0.002951]` | 0.261025 | 0.703687 | 2.000 | 1827.43 |

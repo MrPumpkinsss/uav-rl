@@ -10,12 +10,10 @@ from uav_rl.system_baselines.exact_grouped_oracle import (
     exact_grouped_reward_oracle,
 )
 from uav_rl.system_baselines.hexgen_search import hexgen_inspired_search_baseline
-from uav_rl.system_baselines.lingualinked_uav import lingualinked_uav_baseline
 
 __all__ = [
     "ExactOracleResult",
     "edge_shard_uav_baseline",
     "exact_grouped_reward_oracle",
     "hexgen_inspired_search_baseline",
-    "lingualinked_uav_baseline",
 ]
