@@ -14,7 +14,7 @@ from uav_rl.resource_assignment import ResourceConstrainedConfig
 
 def state_dimension(config: ResourceConstrainedConfig) -> int:
     """Channel plus prefix progress, resource usage, and previous-UAV features."""
-
+    """UAV 之间的 channel quality 矩阵  当前处理进度，例如已经处理到第几层   每台 UAV 的资源使用情况和负载情况      上一个 layer 被分配到哪台 UAV 的 one-hot 向量"""
     uavs = config.system.num_uavs
     return uavs * uavs + 1 + 2 * uavs + uavs
 
@@ -123,14 +123,14 @@ class LayerwiseActorCritic(nn.Module):
         """初始化 layerwise policy 网络，用于逐层选择 UAV。"""
         super().__init__()
         self.config = config
-        self.encoder = nn.Sequential(
+        self.encoder = nn.Sequential(         #状态编码器 输入的是当前资源分配状态：当前处理到了哪一层，每台 UAV 已经分配了多少计算资源，当前信道质量。。。
             nn.Linear(state_dimension(config), hidden_dim),
             nn.Tanh(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.Tanh(),
         )
-        self.actor_head = nn.Linear(hidden_dim, config.system.num_uavs)
-        self.value_head = nn.Linear(hidden_dim, 1)
+        self.actor_head = nn.Linear(hidden_dim, config.system.num_uavs)  #Actor 分支，负责选择 UAV
+        self.value_head = nn.Linear(hidden_dim, 1)    #Critic 分支，输出一个标量，用来估计当前状态未来能够获得多大的累计 reward
 
     def _distribution(self, states: torch.Tensor, masks: torch.Tensor) -> Categorical:
         """执行 _distribution，完成本模块中的对应数据处理或实验步骤。"""
