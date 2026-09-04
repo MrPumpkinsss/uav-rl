@@ -16,6 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--comparison-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--smooth-window", type=int, default=5, help="对平均曲线做 rolling mean 的点数。")
     return parser.parse_args()
 
 
@@ -41,31 +42,41 @@ def _validation_curve(history: dict, config: dict) -> tuple[np.ndarray, np.ndarr
     return episodes[finite], values[finite]
 
 
-def _plot_seed_curves(
+def _plot_mean_curves(
     axis: plt.Axes,
     curves: dict[str, list[tuple[np.ndarray, np.ndarray]]],
     *,
     ylabel: str,
+    smooth_window: int,
 ) -> None:
+    """对不同 seed 插值取平均，并只绘制清晰的算法平均曲线。"""
     for algorithm, series in curves.items():
-        color = COLORS.get(algorithm)
-        for x, y in series:
-            axis.plot(x, y, color=color, alpha=0.22, linewidth=1.0)
         if not series:
             continue
-        common_x = np.unique(np.concatenate([x for x, _ in series]))
-        interpolated = np.stack([np.interp(common_x, x, y) for x, y in series])
+        # 所有 seed 使用同一个训练预算；在共同 episode 网格上插值后再取均值。
+        end_episode = min(float(x[-1]) for x, _ in series)
+        common_x = np.unique(
+            np.concatenate([x[x <= end_episode] for x, _ in series])
+        )
+        values = np.stack(
+            [np.interp(common_x, x, y) for x, y in series],
+            axis=0,
+        ).mean(axis=0)
+        if smooth_window > 1 and len(values) >= smooth_window:
+            kernel = np.ones(smooth_window, dtype=float) / smooth_window
+            # 使用 same 卷积保持 episode 横坐标和平均曲线长度一致。
+            values = np.convolve(values, kernel, mode="same")
         axis.plot(
             common_x,
-            interpolated.mean(axis=0),
-            color=color,
-            linewidth=2.2,
+            values,
+            color=COLORS.get(algorithm),
+            linewidth=2.5,
             label=algorithm.upper(),
         )
     axis.set_xlabel("Environment episodes")
     axis.set_ylabel(ylabel)
     axis.grid(alpha=0.25)
-    axis.legend()
+    axis.legend(frameon=True)
 
 
 def main() -> None:
@@ -84,9 +95,9 @@ def main() -> None:
         validation_curves.setdefault(algorithm, []).append(_validation_curve(history, config))
 
     figure, axes = plt.subplots(1, 2, figsize=(11.5, 4.2), constrained_layout=True)
-    _plot_seed_curves(axes[0], training_curves, ylabel="Surrogate training reward")
-    _plot_seed_curves(axes[1], validation_curves, ylabel="Deterministic validation reward")
-    figure.suptitle("UAV layer-assignment RL algorithm comparison")
+    _plot_mean_curves(axes[0], training_curves, ylabel="Mean surrogate training reward", smooth_window=args.smooth_window)
+    _plot_mean_curves(axes[1], validation_curves, ylabel="Mean deterministic validation reward", smooth_window=args.smooth_window)
+    figure.suptitle("UAV layer-assignment RL algorithm comparison (mean over seeds)")
     output = args.output or args.comparison_dir / "learning_curves.png"
     output.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output, dpi=220)

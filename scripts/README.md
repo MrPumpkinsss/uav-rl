@@ -20,6 +20,7 @@ $env:PYTHONPATH = "src"
 | `ppo/train.py` | Train or resume PPO directly with the true CodeLlama PPL backend. |
 | `ppo/train_layerwise_topk.py` | Train the current arbitrary layer-to-UAV PPO and export original Top-K candidates. |
 | `ppo/validate_true_policy.py` | Select frozen candidates using independent true CodeLlama PPL. |
+| `ppo/plot_training_curves.py` | 从 PPO training state 导出 reward、validation、latency 和 log-PPL 四张收敛图。 |
 
 The older segment/surrogate PPO scripts and the previous baseline-comparison scripts are archived under `legacy/experiments_2026_09/ppo/`. The current PPO entry point is `ppo/train_layerwise_topk.py`; direct true-PPL training is `ppo/train.py`.
 
