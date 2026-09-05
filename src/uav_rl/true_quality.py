@@ -16,6 +16,29 @@ from uav_rl.config import DataGenerationConfig
 from uav_rl.models import activation_dropout
 
 
+def _find_decoder_layers(model: Any) -> Any:
+    """查找文本 decoder 的 layer 列表，兼容 Llama 和 Qwen3.5 包装结构。"""
+    candidates = (
+        "model.layers",
+        "model.language_model.layers",
+        "language_model.layers",
+        "transformer.h",
+    )
+    for path in candidates:
+        current = model
+        try:
+            for part in path.split("."):
+                current = getattr(current, part)
+        except AttributeError:
+            continue
+        if hasattr(current, "__len__") and len(current) > 1:
+            return current
+    raise AttributeError(
+        "无法找到 decoder layers；已尝试 model.layers、"
+        "model.language_model.layers、language_model.layers 和 transformer.h"
+    )
+
+
 class TruePPLQualityEvaluator:
     """Evaluate deterministic activation-corruption PPL with a resident LLM.
 
@@ -85,7 +108,10 @@ class TruePPLQualityEvaluator:
         print(f"clean_perplexity={self.clean_perplexity:.6f}", flush=True)
         self.evaluated_sequences = clean.evaluated_sequences
         self.evaluated_tokens = clean.evaluated_tokens
-        self.num_boundaries = len(self.model.model.layers) - 1
+        # 记录实际文本 decoder 的层数；Qwen3.5 是多模态包装模型，
+        # 其文本层可能位于 model.language_model.layers。
+        self.decoder_layers = _find_decoder_layers(self.model)
+        self.num_boundaries = len(self.decoder_layers) - 1
 
     @staticmethod
     def _key(probabilities: np.ndarray, noise_seed: int) -> tuple[bytes, int]:

@@ -9,6 +9,20 @@ from typing import Any
 import torch
 
 
+def _find_decoder_layers(model: Any) -> Any:
+    """查找 Llama/Qwen3.5 文本 decoder 的层列表。"""
+    for path in ("model.layers", "model.language_model.layers", "language_model.layers", "transformer.h"):
+        current = model
+        try:
+            for part in path.split("."):
+                current = getattr(current, part)
+        except AttributeError:
+            continue
+        if hasattr(current, "__len__") and len(current) > 1:
+            return current
+    raise AttributeError("无法找到模型 decoder layers")
+
+
 @contextmanager
 def activation_dropout(
     model: Any,
@@ -28,7 +42,7 @@ def activation_dropout(
         return hook
 
     try:
-        layers = model.model.layers
+        layers = _find_decoder_layers(model)
         for layer, probability in boundary_probabilities.items():
             if probability <= 0.0:
                 continue
