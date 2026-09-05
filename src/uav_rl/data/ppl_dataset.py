@@ -37,6 +37,11 @@ def prepare_corpus(config: DataGenerationConfig, tokenizer: Any) -> dict[str, to
         dataset = dataset.select(range(min(config.text_sample_limit, len(dataset))))
     print("ppl_dataset_loaded=true", flush=True)
     texts = [text for text in dataset["text"] if text.strip()]
+
+    # PPL 的批处理会根据每条序列的有效长度截断右侧 padding。
+    # 如果 tokenizer 使用左侧 padding，短序列截断后可能只剩 padding，
+    # 最终没有任何 next-token target。因此这里统一使用右侧 padding。
+    tokenizer.padding_side = "right"
     encoded = tokenizer(
         texts,
         add_special_tokens=True,
