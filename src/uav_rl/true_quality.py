@@ -30,6 +30,7 @@ class TruePPLQualityEvaluator:
         device_name: str = "cuda",
         cache_path: Path | None = None,
         progress_interval: int = 10,
+        device_map: str | dict[str, int | str] | None = None,
     ) -> None:
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -44,6 +45,7 @@ class TruePPLQualityEvaluator:
             raise RuntimeError("CUDA was requested, but PyTorch cannot access a CUDA device")
         self.cache_path = cache_path
         self.progress_interval = progress_interval
+        self.device_map = device_map
         self._compute_perplexity = compute_perplexity
         self._validate_cache_metadata(cache_path, generation)
         self._cache = self._load_cache(cache_path)
@@ -54,12 +56,20 @@ class TruePPLQualityEvaluator:
         tokenizer = AutoTokenizer.from_pretrained(generation.model_id)
         if tokenizer.pad_token_id is None:
             tokenizer.pad_token = tokenizer.eos_token
+
+        # 多卡模式下由 Accelerate 将模型分布到可见 GPU；此时不能再次调用
+        # model.to(cuda)，否则会尝试把整个大模型移动到单张 GPU。
+        model_kwargs: dict[str, Any] = {
+            "dtype": torch_dtype(generation.dtype),
+            "low_cpu_mem_usage": True,
+            "attn_implementation": "eager",
+        }
+        if self.device_map is not None:
+            model_kwargs["device_map"] = self.device_map
         self.model = AutoModelForCausalLM.from_pretrained(
             generation.model_id,
-            dtype=torch_dtype(generation.dtype),
-            low_cpu_mem_usage=True,
-            attn_implementation="eager",
-        ).to(self.device)
+            **model_kwargs,
+        )
         self.model.eval()
         print("true_ppl_model_loaded=true", flush=True)
         self.encoded = prepare_corpus(generation, tokenizer)
@@ -69,7 +79,7 @@ class TruePPLQualityEvaluator:
             self.encoded["input_ids"],
             self.encoded["attention_mask"],
             batch_size=generation.batch_size,
-            device=self.device,
+            device=self._input_device(),
         )
         self.clean_perplexity = clean.perplexity
         print(f"clean_perplexity={self.clean_perplexity:.6f}", flush=True)
@@ -145,6 +155,18 @@ class TruePPLQualityEvaluator:
             cache_file.flush()
             os.fsync(cache_file.fileno())
 
+    def _input_device(self) -> torch.device:
+        """返回模型 embedding 所在的输入设备，兼容 device_map 多卡加载。"""
+        if self.device_map is not None:
+            return self.model.get_input_embeddings().weight.device
+        return self.device
+
+    def _cuda_rng_devices(self) -> list[int]:
+        """返回当前进程可见的 CUDA 设备，保证多卡 noise seed 可复现。"""
+        if self.device.type != "cuda":
+            return []
+        return list(range(torch.cuda.device_count()))
+
     def _release_unused_cuda_memory(self) -> None:
         """Return inactive allocator blocks between independent PPL forwards.
 
@@ -155,7 +177,8 @@ class TruePPLQualityEvaluator:
         """
 
         if self.device.type == "cuda":
-            torch.cuda.empty_cache()
+            for gpu_index in range(torch.cuda.device_count()):
+                torch.cuda.empty_cache()
 
     def _evaluate_one(self, probabilities: np.ndarray, noise_seed: int) -> float:
         key = self._key(probabilities, noise_seed)
@@ -168,11 +191,9 @@ class TruePPLQualityEvaluator:
             for layer, probability in enumerate(probabilities)
             if probability > 0.0
         }
-        cuda_devices = (
-            [self.device.index if self.device.index is not None else torch.cuda.current_device()]
-            if self.device.type == "cuda"
-            else []
-        )
+        # 多卡模型的 activation 可能位于多张 GPU；所有可见 CUDA 设备都
+        # 纳入 fork_rng，避免同一个 noise seed 在不同设备上产生不一致结果。
+        cuda_devices = self._cuda_rng_devices()
         with torch.random.fork_rng(devices=cuda_devices):
             torch.manual_seed(noise_seed)
             with activation_dropout(self.model, active_probabilities):
@@ -181,7 +202,7 @@ class TruePPLQualityEvaluator:
                     self.encoded["input_ids"],
                     self.encoded["attention_mask"],
                     batch_size=self.generation.batch_size,
-                    device=self.device,
+                    device=self._input_device(),
                 )
         self._release_unused_cuda_memory()
         if not math.isfinite(result.perplexity):
