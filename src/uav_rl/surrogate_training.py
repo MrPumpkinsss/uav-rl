@@ -629,8 +629,10 @@ def _write_report(path: Path, result: dict[str, Any]) -> None:
         lines.append(f"- {'PASS' if passed else 'FAIL'}: `{name}`")
     lines.extend(["", "## Diagnostic plots", ""])
     for name, plot_path in result["plots"].items():
-        relative = Path(plot_path).relative_to(path.parent)
-        lines.append(f"- [{name}]({relative.as_posix()})")
+        # plots 可能与 report 位于同级目录的兄弟目录，relative_to 在这种
+        # 情况下会抛出异常；使用 relpath 生成跨目录的可点击相对路径。
+        relative = os.path.relpath(Path(plot_path), start=path.parent)
+        lines.append(f"- [{name}]({Path(relative).as_posix()})")
     if not acceptance["passed"]:
         worst = max(test["per_source"], key=lambda key: test["per_source"][key]["mae"])
         region = test["worst_error_region"]
